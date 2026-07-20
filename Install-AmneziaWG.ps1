@@ -1,3 +1,12 @@
+# =====================================================================================
+# Install-AmneziaWG.ps1
+# Назначение: удалённая установка/обновление/переконфигурация AmneziaWG (WireGuard
+# с обфускацией) на VDS под Ubuntu/Debian через SSH из PowerShell.
+# Скрипт подключается по SSH (по ключу или паролю), генерирует случайные параметры
+# обфускации (JC/JMIN/JMAX/S1/S2/H1-H4), поднимает Docker-контейнеры awg-easy и
+# (опционально) Caddy для TLS, настраивает UFW и проверяет, что сервис поднялся
+# и отвечает.
+# =====================================================================================
 #requires -Version 7.0
 [CmdletBinding()]
 param(
@@ -30,8 +39,8 @@ try {
  $opt=@('-o','ConnectTimeout=15','-o','StrictHostKeyChecking=accept-new')
  if($IdentityFile){$opt+=@('-o','BatchMode=yes','-o','IdentitiesOnly=yes','-i',$IdentityFile)}else{$ask=Join-Path $env:TEMP "awg-askpass-$([guid]::NewGuid()).cmd";Set-Content $ask @('@echo off','echo %AWG_SSH_PASSWORD%') -Encoding ascii;$env:AWG_SSH_PASSWORD=$password;$env:SSH_ASKPASS=$ask;$env:SSH_ASKPASS_REQUIRE='force';$env:DISPLAY='1'}
  Write-Host 'Проверяю SSH-доступ и ключ хоста...' -ForegroundColor Cyan; & ssh @opt "$SshUser@$HostName" true; if($LASTEXITCODE){throw "SSH-предпроверка завершилась с кодом $LASTEXITCODE."}
- $remote=@'
-set -euo pipefail
+$remote=@'
+set -eu
 MODE='__MODE__'; HOST='__HOST__'; VPN='__VPN__'; WEB='__WEB__'; TLS='__TLS__'; UFW='__UFW__'; RESTRICT='__RESTRICT__'; DISABLE='__DISABLE__'
 [ "$(id -u)" = 0 ] || { echo 'ERROR=SSH user must be root.' >&2; exit 1; }
 . /etc/os-release; case "$ID" in ubuntu|debian);; *) echo "ERROR=Unsupported OS: $ID" >&2; exit 1;; esac
@@ -53,6 +62,36 @@ firewall(){ [ "$UFW" = true ]||{ echo 'WARNING=Firewall was not modified; open r
 verify(){ h=;n=0;until [ "$h" = healthy ]||[ "$n" -ge 12 ];do h="$(docker inspect -f '{{.State.Health.Status}}' amnezia-wg-easy 2>/dev/null||true)";[ "$h" = healthy ]&&break;n=$((n+1));sleep 5;done;test "$h" = healthy;test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$WEB/")" = 200;docker exec amnezia-wg-easy awg show >/dev/null;ss -ltnH|grep -Eq "[:.]$WEB([[:space:]]|$)";ss -lunH|grep -Eq "[:.]$VPN([[:space:]]|$)"; }
 case "$MODE" in Install) exists&&{ echo 'ERROR=Existing installation found. Use Update, Status, or Reconfigure -Force.'>&2;exit 1;};packages;sysctl_apply;install -d -m 700 /opt/awg-easy/wireguard;generate_awg_params;p="$(openssl rand -hex 16)";write_env "$p";run;tls;firewall;verify;echo "RESULT_UI=http://$HOST:$WEB";echo "RESULT_PASSWORD=$p";; Update) exists||{ echo 'ERROR=No installation found.'>&2;exit 1;};packages;sysctl_apply;run;tls;firewall;verify;echo "RESULT_UI=http://$HOST:$WEB";; Reconfigure) exists||{ echo 'ERROR=No installation found.'>&2;exit 1;};packages;sysctl_apply;generate_awg_params;p="$(openssl rand -hex 16)";write_env "$p";run;tls;firewall;verify;echo "RESULT_UI=http://$HOST:$WEB";echo "RESULT_PASSWORD=$p";; Status) exists||{ echo 'ERROR=No installation found.'>&2;exit 1;};verify;echo "RESULT_UI=http://$HOST:$WEB";echo RESULT_STATUS=healthy;; esac
 '@
- $remote=$remote.Replace('__MODE__',$Mode).Replace('__HOST__',$HostName).Replace('__VPN__',"$VpnPort").Replace('__WEB__',"$WebPort").Replace('__TLS__',$TlsDomain).Replace('__UFW__',$ConfigureUfw.IsPresent.ToString().ToLower()).Replace('__RESTRICT__',$RestrictPanelToTls.IsPresent.ToString().ToLower()).Replace('__DISABLE__',$DisableTls.IsPresent.ToString().ToLower())
- $out=& ssh @opt "$SshUser@$HostName" $remote 2>&1;$out|?{"$_" -notmatch '^RESULT_PASSWORD='}|%{Write-Host $_};if($LASTEXITCODE){throw "Удалённая команда завершилась с кодом $LASTEXITCODE."};$ui=Result $out RESULT_UI;if(!$ui){throw 'Удалённая проверка не вернула адрес панели.'};$public=if($TlsDomain){"https://$TlsDomain"}else{$ui};Check-External $public;Write-Host "`nГотово. Панель: $public" -ForegroundColor Green;$panelPassword=Result $out RESULT_PASSWORD;if($panelPassword){Write-Host "Пароль панели: $panelPassword" -ForegroundColor Yellow};Write-Host "VPN: UDP $VpnPort."
+$remote = $remote.Replace('__MODE__',$Mode).Replace('__HOST__',$HostName).Replace('__VPN__',"$VpnPort").Replace('__WEB__',"$WebPort").Replace('__TLS__',$TlsDomain).Replace('__UFW__',$ConfigureUfw.IsPresent.ToString().ToLower()).Replace('__RESTRICT__',$RestrictPanelToTls.IsPresent.ToString().ToLower()).Replace('__DISABLE__',$DisableTls.IsPresent.ToString().ToLower())
+# Нормализуем переносы строк на Unix-стиль (LF), чтобы избежать проблем при кодировании
+$remote = $remote -replace "`r`n", "`n"
+
+# ВАЖНО: скрипт передаётся на сервер не через прямой конвейер "| ssh ... bash -s",
+# а закодированным в Base64. Прямая передача многострочного текста через конвейер
+# PowerShell -> ssh -> bash на Windows может искажаться (лишние \r, особенности
+# буферизации/кодировки консоли), из-за чего bash получает повреждённый скрипт и
+# падает с ошибкой вида "syntax error near unexpected token `newline'" (код возврата 2).
+# Base64 состоит только из ASCII-символов (A-Z a-z 0-9 + / =), поэтому такая передача
+# гарантированно не искажается независимо от кодировки консоли и настроек конвейера.
+$remoteBytes = [System.Text.Encoding]::UTF8.GetBytes($remote)
+$remoteBase64 = [Convert]::ToBase64String($remoteBytes)
+# На сервере строка декодируется обратно в текст скрипта и передаётся в bash через stdin
+$remoteCommand = "echo '$remoteBase64' | base64 -d | bash -s"
+
+# Единственный запуск удалённого скрипта.
+# (Ранее здесь был повторный вызов той же команды строкой ниже — это была ошибка
+# копирования: при успешном первом запуске вся установка/настройка выполнялась
+# на сервере ЕЩЁ РАЗ, что для режима Install приводило к ошибке "уже установлено".
+# Дублирующий блок удалён.)
+$out = & ssh @opt "$SshUser@$HostName" $remoteCommand 2>&1
+$out | Where-Object { $_ -notmatch '^RESULT_PASSWORD=' } | ForEach-Object { Write-Host $_ }
+if ($LASTEXITCODE) { throw "Удалённая команда завершилась с кодом $LASTEXITCODE." }
+$ui = Result $out RESULT_UI
+if (!$ui) { throw 'Удалённая проверка не вернула адрес панели.' }
+$public = if ($TlsDomain) { "https://$TlsDomain" } else { $ui }
+Check-External $public
+Write-Host "`nГотово. Панель: $public" -ForegroundColor Green
+$panelPassword = Result $out RESULT_PASSWORD
+if ($panelPassword) { Write-Host "Пароль панели: $panelPassword" -ForegroundColor Yellow }
+Write-Host "VPN: UDP $VpnPort."
 } finally {if($ask){Remove-Item $ask -Force -EA SilentlyContinue};foreach($n in $names){if($null -eq $old[$n]){Remove-Item "Env:$n" -EA SilentlyContinue}else{Set-Item "Env:$n" $old[$n]}}}
