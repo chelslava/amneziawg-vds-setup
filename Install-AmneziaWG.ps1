@@ -6,6 +6,19 @@
 # обфускации (JC/JMIN/JMAX/S1/S2/H1-H4), поднимает Docker-контейнеры awg-easy и
 # (опционально) Caddy для TLS, настраивает UFW и проверяет, что сервис поднялся
 # и отвечает.
+#
+# Совместимость с Debian: поддерживаются Debian 11 (Bullseye) и новее — в их ядре
+# (5.10+) WireGuard уже встроен. Debian 10 (Buster, ядро 4.19) технически не
+# заблокирован скриптом, но модуля WireGuard в ядре по умолчанию нет — контейнер
+# перейдёт в userspace-режим (об этом скрипт выведет WARNING, установка не прервётся).
+# Для Debian также добавлен обход интерактивного диалога needrestart при apt-get.
+# Docker ставится не из пакета docker.io дистрибутива (на части образов Debian он
+# отсутствует в подключённых репозиториях или сильно устарел), а из официального
+# репозитория Docker — сценарий одинаков для Ubuntu и Debian.
+#
+# Интерактивный вывод: ход установки на сервере (STEP=...) и вывод apt-get/docker
+# печатаются в консоль PowerShell сразу по мере поступления, а не одним блоком
+# после завершения — это позволяет видеть прогресс и быстрее находить причину сбоя.
 # =====================================================================================
 #requires -Version 7.0
 [CmdletBinding()]
@@ -44,7 +57,35 @@ set -eu
 MODE='__MODE__'; HOST='__HOST__'; VPN='__VPN__'; WEB='__WEB__'; TLS='__TLS__'; UFW='__UFW__'; RESTRICT='__RESTRICT__'; DISABLE='__DISABLE__'
 [ "$(id -u)" = 0 ] || { echo 'ERROR=SSH user must be root.' >&2; exit 1; }
 . /etc/os-release; case "$ID" in ubuntu|debian);; *) echo "ERROR=Unsupported OS: $ID" >&2; exit 1;; esac
-exists(){ test -f /opt/awg-easy/.env; }; packages(){ apt-get update; apt-get install -y docker.io apache2-utils openssl curl; systemctl enable --now docker; }
+exists(){ test -f /opt/awg-easy/.env; }
+# ВАЖНО (Debian): needrestart по умолчанию на Debian 11/12 показывает интерактивный
+# диалог "какие службы перезапустить" при apt-get install/upgrade. В неинтерактивной
+# SSH-сессии (без tty) это может подвесить установку. DEBIAN_FRONTEND=noninteractive
+# отключает диалоги debconf, NEEDRESTART_MODE=a переводит needrestart в автоматический
+# режим без запросов. На Ubuntu эти переменные тоже безопасны и ни на что не влияют.
+# Docker ставим не из пакета docker.io дистрибутива (на части образов Debian его нет
+# в подключённых репозиториях, либо версия сильно устаревшая — отсюда "docker: command
+# not found" после установки), а из официального репозитория Docker. Он поддерживает
+# и Ubuntu, и Debian по одному и тому же сценарию: добавляем GPG-ключ и репозиторий,
+# используя $ID и $VERSION_CODENAME из /etc/os-release, затем ставим docker-ce.
+install_docker(){
+  command -v docker >/dev/null 2>&1 && return 0
+  apt-get install -y ca-certificates curl gnupg
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  arch="$(dpkg --print-architecture)"
+  echo "deb [arch=$arch signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$ID $VERSION_CODENAME stable" >/etc/apt/sources.list.d/docker.list
+  apt-get update
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
+packages(){ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; apt-get update; install_docker; apt-get install -y apache2-utils openssl curl; systemctl enable --now docker; }
+# Best-effort проверка поддержки WireGuard в ядре хоста (не является фатальной ошибкой):
+# на Debian 10/Buster (ядро 4.19) модуля wireguard может не быть в ядре "из коробки"
+# (в отличие от Debian 11+/Ubuntu 20.04+ с ядром 5.6+, где WireGuard встроен в ядро).
+# Контейнер awg-easy в этом случае сам переключится на userspace-реализацию, но
+# производительность/поведение могут отличаться — пользователь должен это увидеть.
+check_kernel_wg(){ modprobe wireguard 2>/dev/null||true; if ! lsmod 2>/dev/null|grep -q '^wireguard' && [ ! -e /sys/module/wireguard ];then echo 'WARNING=Kernel module "wireguard" not detected; container will fall back to userspace mode. On Debian 10 consider Debian 11+ or install wireguard-dkms.';fi; }
 sysctl_apply(){ printf '%s\n' net.ipv4.ip_forward=1 net.ipv4.conf.all.src_valid_mark=1 >/etc/sysctl.d/99-amneziawg.conf;sysctl --system >/dev/null; }
 rand_range(){ min="$1";max="$2";printf '%s' "$(( min + $(od -An -N4 -tu4 /dev/urandom) % (max - min + 1) ))"; }
 generate_awg_params(){
@@ -60,7 +101,54 @@ run(){ docker pull ghcr.io/yokitoki/awg-easy:latest;docker rm -f amnezia-wg-easy
 tls(){ if [ -n "$TLS" ];then install -d -m 700 /opt/awg-easy/caddy-data /opt/awg-easy/caddy-config;printf '%s {\n reverse_proxy 127.0.0.1:%s\n}\n' "$TLS" "$WEB">/opt/awg-easy/Caddyfile;docker pull caddy:2-alpine;docker rm -f amnezia-wg-caddy >/dev/null 2>&1||true;docker run -d --name amnezia-wg-caddy --network host -v /opt/awg-easy/Caddyfile:/etc/caddy/Caddyfile:ro -v /opt/awg-easy/caddy-data:/data -v /opt/awg-easy/caddy-config:/config --restart unless-stopped caddy:2-alpine >/dev/null;elif [ "$DISABLE" = true ];then docker rm -f amnezia-wg-caddy >/dev/null 2>&1||true;fi; }
 firewall(){ [ "$UFW" = true ]||{ echo 'WARNING=Firewall was not modified; open required VDS/provider ports.';return;};command -v ufw >/dev/null||{ echo 'WARNING=UFW is unavailable.';return;};[ "$(ufw status|head -1)" = 'Status: active' ]||{ echo 'WARNING=UFW is inactive.';return;};ufw allow "$VPN/udp";if [ -n "$TLS" ];then ufw allow 80/tcp;ufw allow 443/tcp;[ "$RESTRICT" = true ]&&ufw deny "$WEB/tcp"||true;else ufw allow "$WEB/tcp";fi; }
 verify(){ h=;n=0;until [ "$h" = healthy ]||[ "$n" -ge 12 ];do h="$(docker inspect -f '{{.State.Health.Status}}' amnezia-wg-easy 2>/dev/null||true)";[ "$h" = healthy ]&&break;n=$((n+1));sleep 5;done;test "$h" = healthy;test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$WEB/")" = 200;docker exec amnezia-wg-easy awg show >/dev/null;ss -ltnH|grep -Eq "[:.]$WEB([[:space:]]|$)";ss -lunH|grep -Eq "[:.]$VPN([[:space:]]|$)"; }
-case "$MODE" in Install) exists&&{ echo 'ERROR=Existing installation found. Use Update, Status, or Reconfigure -Force.'>&2;exit 1;};packages;sysctl_apply;install -d -m 700 /opt/awg-easy/wireguard;generate_awg_params;p="$(openssl rand -hex 16)";write_env "$p";run;tls;firewall;verify;echo "RESULT_UI=http://$HOST:$WEB";echo "RESULT_PASSWORD=$p";; Update) exists||{ echo 'ERROR=No installation found.'>&2;exit 1;};packages;sysctl_apply;run;tls;firewall;verify;echo "RESULT_UI=http://$HOST:$WEB";; Reconfigure) exists||{ echo 'ERROR=No installation found.'>&2;exit 1;};packages;sysctl_apply;generate_awg_params;p="$(openssl rand -hex 16)";write_env "$p";run;tls;firewall;verify;echo "RESULT_UI=http://$HOST:$WEB";echo "RESULT_PASSWORD=$p";; Status) exists||{ echo 'ERROR=No installation found.'>&2;exit 1;};verify;echo "RESULT_UI=http://$HOST:$WEB";echo RESULT_STATUS=healthy;; esac
+check_kernel_wg
+case "$MODE" in
+  Install)
+    exists && { echo 'ERROR=Existing installation found. Use Update, Status, or Reconfigure -Force.' >&2; exit 1; }
+    echo 'STEP=Устанавливаю Docker и системные пакеты...'; packages
+    echo 'STEP=Применяю sysctl (ip_forward, src_valid_mark)...'; sysctl_apply
+    install -d -m 700 /opt/awg-easy/wireguard
+    echo 'STEP=Генерирую параметры обфускации AmneziaWG...'; generate_awg_params
+    p="$(openssl rand -hex 16)"
+    write_env "$p"
+    echo 'STEP=Запускаю контейнер AmneziaWG...'; run
+    echo 'STEP=Настраиваю TLS (Caddy)...'; tls
+    echo 'STEP=Настраиваю firewall (UFW)...'; firewall
+    echo 'STEP=Проверяю, что сервис поднялся...'; verify
+    echo "RESULT_UI=http://$HOST:$WEB"
+    echo "RESULT_PASSWORD=$p"
+    ;;
+  Update)
+    exists || { echo 'ERROR=No installation found.' >&2; exit 1; }
+    echo 'STEP=Устанавливаю Docker и системные пакеты...'; packages
+    echo 'STEP=Применяю sysctl...'; sysctl_apply
+    echo 'STEP=Обновляю и перезапускаю контейнер AmneziaWG...'; run
+    echo 'STEP=Настраиваю TLS (Caddy)...'; tls
+    echo 'STEP=Настраиваю firewall (UFW)...'; firewall
+    echo 'STEP=Проверяю, что сервис поднялся...'; verify
+    echo "RESULT_UI=http://$HOST:$WEB"
+    ;;
+  Reconfigure)
+    exists || { echo 'ERROR=No installation found.' >&2; exit 1; }
+    echo 'STEP=Устанавливаю Docker и системные пакеты...'; packages
+    echo 'STEP=Применяю sysctl...'; sysctl_apply
+    echo 'STEP=Генерирую новые параметры обфускации AmneziaWG...'; generate_awg_params
+    p="$(openssl rand -hex 16)"
+    write_env "$p"
+    echo 'STEP=Перезапускаю контейнер AmneziaWG...'; run
+    echo 'STEP=Настраиваю TLS (Caddy)...'; tls
+    echo 'STEP=Настраиваю firewall (UFW)...'; firewall
+    echo 'STEP=Проверяю, что сервис поднялся...'; verify
+    echo "RESULT_UI=http://$HOST:$WEB"
+    echo "RESULT_PASSWORD=$p"
+    ;;
+  Status)
+    exists || { echo 'ERROR=No installation found.' >&2; exit 1; }
+    echo 'STEP=Проверяю, что сервис поднялся...'; verify
+    echo "RESULT_UI=http://$HOST:$WEB"
+    echo RESULT_STATUS=healthy
+    ;;
+esac
 '@
 $remote = $remote.Replace('__MODE__',$Mode).Replace('__HOST__',$HostName).Replace('__VPN__',"$VpnPort").Replace('__WEB__',"$WebPort").Replace('__TLS__',$TlsDomain).Replace('__UFW__',$ConfigureUfw.IsPresent.ToString().ToLower()).Replace('__RESTRICT__',$RestrictPanelToTls.IsPresent.ToString().ToLower()).Replace('__DISABLE__',$DisableTls.IsPresent.ToString().ToLower())
 # Нормализуем переносы строк на Unix-стиль (LF), чтобы избежать проблем при кодировании
@@ -83,8 +171,19 @@ $remoteCommand = "echo '$remoteBase64' | base64 -d | bash -s"
 # копирования: при успешном первом запуске вся установка/настройка выполнялась
 # на сервере ЕЩЁ РАЗ, что для режима Install приводило к ошибке "уже установлено".
 # Дублирующий блок удалён.)
-$out = & ssh @opt "$SshUser@$HostName" $remoteCommand 2>&1
-$out | Where-Object { $_ -notmatch '^RESULT_PASSWORD=' } | ForEach-Object { Write-Host $_ }
+#
+# ИНТЕРАКТИВНЫЙ ВЫВОД: строки от удалённого скрипта печатаются в консоль СРАЗУ,
+# по мере поступления (через конвейер в ForEach-Object), а не одним блоком после
+# завершения всей команды. Раньше во время долгих шагов (apt-get update, docker
+# pull) на экране не было вообще никакого вывода, и было не понятно, на каком
+# шаге и почему всё падает. Пароль панели по-прежнему не печатается построчно
+# (фильтруется), а показывается один раз в конце явным сообщением.
+$out = [System.Collections.Generic.List[string]]::new()
+& ssh @opt "$SshUser@$HostName" $remoteCommand 2>&1 | ForEach-Object {
+    $out.Add($_)
+    if ($_ -match '^STEP=') { Write-Host $_.Substring(5) -ForegroundColor Cyan }
+    elseif ($_ -notmatch '^RESULT_PASSWORD=') { Write-Host $_ }
+}
 if ($LASTEXITCODE) { throw "Удалённая команда завершилась с кодом $LASTEXITCODE." }
 $ui = Result $out RESULT_UI
 if (!$ui) { throw 'Удалённая проверка не вернула адрес панели.' }
