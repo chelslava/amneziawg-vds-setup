@@ -269,20 +269,18 @@ func newState(o config.Options) state.State {
 }
 
 func dependenciesCommand(upstream bool) string {
-	cmd := "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; command -v docker >/dev/null 2>&1 || (apt-get update; apt-get install -y ca-certificates docker.io docker-compose-plugin); systemctl enable --now docker; "
+	cmd := "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; command -v docker >/dev/null 2>&1 || (apt-get update; apt-get install -y ca-certificates apache2-utils openssl docker.io docker-compose-plugin); command -v htpasswd >/dev/null 2>&1 || apt-get install -y apache2-utils; command -v openssl >/dev/null 2>&1 || apt-get install -y openssl; systemctl enable --now docker; "
 	if upstream {
 		cmd += "if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then apt-get update; apt-get install -y amneziawg; modprobe amneziawg || true; fi; "
 	}
 	return cmd + "printf 'DEPENDENCIES=ok\\n'"
 }
 func envCommand(o config.Options, s state.State) string {
-	var name string
+	name := "upstream.env"
 	if s.Engine == config.Legacy {
 		name = "legacy.env"
-	} else {
-		name = "upstream.env"
 	}
-	return fmt.Sprintf("set -eu; umask 077; tmp=$(mktemp /opt/awg-vds/env.XXXXXX); printf 'WG_HOST=%s\\nPORT=%d\\nWG_PORT=%d\\nWG_PERSISTENT_KEEPALIVE=25\\nWG_DEFAULT_DNS=1.1.1.1,1.0.0.1\\n' %s %d %d >\"$tmp\"; chmod 600 \"$tmp\"; mv \"$tmp\" /opt/awg-vds/%s; printf 'CONFIG=preserved\\n'", shellQuote(hostForPanel(o)), o.WebPort, o.VPNPort, shellQuote(hostForPanel(o)), o.WebPort, o.VPNPort, name)
+	return fmt.Sprintf("set -eu; install -d -m 700 /opt/awg-vds; umask 077; if test ! -s /opt/awg-vds/panel-password; then openssl rand -hex 24 > /opt/awg-vds/panel-password; fi; panel_hash=$(printf '%%s\\n' \"$(cat /opt/awg-vds/panel-password)\" | htpasswd -niBC 12 '' | cut -d: -f2-); tmp=$(mktemp /opt/awg-vds/env.XXXXXX); printf 'WG_HOST=%%s\\nPORT=%%d\\nWG_PORT=%%d\\nWG_PERSISTENT_KEEPALIVE=25\\nWG_DEFAULT_DNS=1.1.1.1,1.0.0.1\\nPASSWORD_HASH=%%s\\n' %s %d %d \"$panel_hash\" >\"$tmp\"; chmod 600 \"$tmp\"; mv \"$tmp\" /opt/awg-vds/%s; printf 'CONFIG=preserved\\n'", shellQuote(hostForPanel(o)), o.WebPort, o.VPNPort, name)
 }
 func hostForPanel(o config.Options) string {
 	if o.Domain != "" {
