@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -15,13 +16,14 @@ import (
 )
 
 type Client struct {
-	Options config.Options
-	Stdin   io.Reader
-	Stdout  io.Writer
-	Stderr  io.Writer
+	Options     config.Options
+	Stdin       io.Reader
+	Stdout      io.Writer
+	Stderr      io.Writer
+	ControlPath string
 }
 
-func (c Client) args() []string {
+func (c Client) baseArgs() []string {
 	a := []string{"-p", fmt.Sprint(c.Options.SSHPort), "-o", "ConnectTimeout=15", "-o", "BatchMode=no", "-o", "StrictHostKeyChecking=yes"}
 	if c.Options.KnownHosts != "" {
 		a = append(a, "-o", "UserKnownHostsFile="+c.Options.KnownHosts)
@@ -34,7 +36,34 @@ func (c Client) args() []string {
 		// reliable on Windows OpenSSH and Unix terminals alike.
 		a = append(a, "-o", "PreferredAuthentications=publickey,password,keyboard-interactive", "-o", "PasswordAuthentication=yes", "-o", "KbdInteractiveAuthentication=yes")
 	}
-	return append(a, c.Options.User+"@"+c.Options.Host)
+	if c.ControlPath != "" {
+		a = append(a, "-o", "ControlMaster=auto", "-o", "ControlPersist=120s", "-o", "ControlPath="+c.ControlPath)
+	}
+	return a
+}
+
+func (c Client) args() []string {
+	return append(c.baseArgs(), c.Options.User+"@"+c.Options.Host)
+}
+
+// EnableConnectionReuse creates a temporary OpenSSH control socket. The first
+// command authenticates interactively; subsequent commands reuse that session.
+func (c *Client) EnableConnectionReuse() (func(), error) {
+	dir, err := os.MkdirTemp("", "awg-vds-ssh-")
+	if err != nil {
+		return nil, err
+	}
+	c.ControlPath = filepath.Join(dir, "control")
+	cleanup := func() {
+		args := append(c.baseArgs(), "-O", "exit", c.Options.User+"@"+c.Options.Host)
+		cmd := exec.Command("ssh", args...)
+		cmd.Stdin = strings.NewReader("")
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		_ = cmd.Run()
+		_ = os.RemoveAll(dir)
+	}
+	return cleanup, nil
 }
 
 func (c Client) Run(ctx context.Context, command string) (string, error) {

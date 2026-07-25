@@ -59,6 +59,11 @@ func runCommand(args []string, out, errOut io.Writer) error {
 		return err
 	}
 	c := ssh.Client{Options: o, Stdin: os.Stdin, Stderr: errOut}
+	cleanupSSH, err := c.EnableConnectionReuse()
+	if err != nil {
+		return fmt.Errorf("prepare SSH connection reuse: %w", err)
+	}
+	defer cleanupSSH()
 	ctx := context.Background()
 	switch o.Command {
 	case "doctor":
@@ -156,8 +161,10 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 		installStep(out, 2, totalSteps, "Running preflight checks")
 		ssh.PrintOutput(out, pre)
 		if err != nil {
+			installFailed(out, "Running preflight checks", err)
 			return err
 		}
+		installDone(out, "Running preflight checks")
 		fmt.Fprintln(out, "Existing installation found; reconciling the selected engine without replacing configuration.")
 		return reconcile(ctx, c, old, out)
 	}
@@ -165,8 +172,10 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 	pre, err := c.Run(ctx, preflight.Command(o))
 	ssh.PrintOutput(out, pre)
 	if err != nil {
+		installFailed(out, "Running preflight checks", err)
 		return err
 	}
+	installDone(out, "Running preflight checks")
 	if strings.Contains(pre, "PORT_TCP_") && strings.Contains(pre, "=busy") {
 		return errors.New("requested port is already occupied; inspect doctor output before installing")
 	}
@@ -176,40 +185,54 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 	installStep(out, 3, totalSteps, "Preparing Docker and AmneziaWG dependencies")
 	if result, err := c.Run(ctx, dependenciesCommand(o.Engine == config.Upstream)); err != nil {
 		ssh.PrintOutput(out, result)
+		installFailed(out, "Preparing Docker and AmneziaWG dependencies", err)
 		return err
 	}
+	installDone(out, "Preparing Docker and AmneziaWG dependencies")
 	s := newState(o)
 	installStep(out, 4, totalSteps, "Preparing protected service configuration")
 	if result, err := c.Run(ctx, envCommand(o, s)); err != nil {
 		ssh.PrintOutput(out, result)
+		installFailed(out, "Preparing protected service configuration", err)
 		return err
 	}
+	installDone(out, "Preparing protected service configuration")
 	e, _ := engine.Select(o.Engine)
 	installStep(out, 5, totalSteps, "Starting the selected VPN engine")
 	if result, err := c.Run(ctx, e.InstallCommand(s)); err != nil {
 		ssh.PrintOutput(out, result)
+		installFailed(out, "Starting the selected VPN engine", err)
 		return err
 	}
+	installDone(out, "Starting the selected VPN engine")
 	installStep(out, 6, totalSteps, "Configuring panel TLS")
 	if result, err := c.Run(ctx, tlsengine.Command(o.TLS, o.Domain, o.WebPort)); err != nil {
 		ssh.PrintOutput(out, result)
+		installFailed(out, "Configuring panel TLS", err)
 		return err
 	}
+	installDone(out, "Configuring panel TLS")
 	installStep(out, 7, totalSteps, "Configuring firewall and port access")
 	if result, err := c.Run(ctx, firewall.Command(o.VPNPort, o.WebPort, o.TLS, o.RestrictIP)); err != nil {
 		ssh.PrintOutput(out, result)
+		installFailed(out, "Configuring firewall and port access", err)
 		return err
 	}
+	installDone(out, "Configuring firewall and port access")
 	installStep(out, 8, totalSteps, "Checking containers, HTTP panel, and UDP listener")
 	if result, err := c.Run(ctx, healthRetryCommand(s)); err != nil {
 		ssh.PrintOutput(out, result)
+		installFailed(out, "Checking containers, HTTP panel, and UDP listener", err)
 		return fmt.Errorf("post-install health check failed: %w", err)
 	}
+	installDone(out, "Checking containers, HTTP panel, and UDP listener")
 	s.UpdatedAt = time.Now().UTC()
 	installStep(out, 9, totalSteps, "Saving installation state")
 	if err := writeState(ctx, c, s); err != nil {
+		installFailed(out, "Saving installation state", err)
 		return err
 	}
+	installDone(out, "Saving installation state")
 	printSummary(out, s)
 	return nil
 }
@@ -225,7 +248,19 @@ func installStep(out io.Writer, current, total int, label string) {
 	}
 	filled := current * 20 / total
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", 20-filled)
-	fmt.Fprintf(out, "\n[%s] %d/%d  %s\n", bar, current, total, label)
+	fmt.Fprintf(out, "\n[%s] %d/%d  %s  (%s)\n", bar, current, total, label, time.Now().Format("15:04:05"))
+}
+
+func installDone(out io.Writer, label string) {
+	if out != nil {
+		fmt.Fprintf(out, "  ✓ %s completed (%s)\n", label, time.Now().Format("15:04:05"))
+	}
+}
+
+func installFailed(out io.Writer, label string, err error) {
+	if out != nil {
+		fmt.Fprintf(out, "  ✗ %s failed: %s\n", label, ssh.Redact(err.Error()))
+	}
 }
 
 func existing(ctx context.Context, c remoteRunner, o config.Options, out io.Writer, action string) error {

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -9,19 +8,23 @@ import (
 	"strings"
 )
 
-func interactiveCommand(in *bufio.Reader, out io.Writer, choice string) ([]string, error) {
-	return interactiveCommandLanguageMode(in, out, choice, langEN, false)
+type lineInput interface {
+	ReadString(byte) (string, error)
 }
 
-func interactiveCommandLanguage(in *bufio.Reader, out io.Writer, choice string, lang uiLanguage) ([]string, error) {
-	return interactiveCommandLanguageMode(in, out, choice, lang, false)
+func interactiveCommand(in lineInput, out io.Writer, choice string) ([]string, error) {
+	return interactiveCommandLanguageMode(in, out, choice, langEN, false, nil)
 }
 
-func interactiveCommandTUI(in *bufio.Reader, out io.Writer, choice string, lang uiLanguage) ([]string, error) {
-	return interactiveCommandLanguageMode(in, out, choice, lang, true)
+func interactiveCommandLanguage(in lineInput, out io.Writer, choice string, lang uiLanguage) ([]string, error) {
+	return interactiveCommandLanguageMode(in, out, choice, lang, false, nil)
 }
 
-func interactiveCommandLanguageMode(in *bufio.Reader, out io.Writer, choice string, lang uiLanguage, useDropdown bool) ([]string, error) {
+func interactiveCommandTUI(in lineInput, raw io.Reader, out io.Writer, choice string, lang uiLanguage) ([]string, error) {
+	return interactiveCommandLanguageMode(in, out, choice, lang, true, raw)
+}
+
+func interactiveCommandLanguageMode(in lineInput, out io.Writer, choice string, lang uiLanguage, useDropdown bool, raw io.Reader) ([]string, error) {
 	command := choice
 	if mapped, ok := map[string]string{"1": "install", "2": "status", "3": "doctor", "4": "update", "5": "backup", "6": "rotate-password"}[choice]; ok {
 		command = mapped
@@ -33,13 +36,13 @@ func interactiveCommandLanguageMode(in *bufio.Reader, out io.Writer, choice stri
 		return nil, nil
 	}
 	args := []string{command}
-	connection, err := interactiveConnectionLanguageMode(in, out, lang, useDropdown)
+	connection, err := interactiveConnectionLanguageMode(in, raw, out, lang, useDropdown)
 	if err != nil {
 		return nil, err
 	}
 	args = append(args, connection...)
 	if command == "install" || command == "doctor" {
-		engine, err := selectInteractiveValue(in, out, tr(lang, "engine"), []string{"legacy", "upstream"}, 0, useDropdown)
+		engine, err := selectInteractiveValue(in, raw, out, tr(lang, "engine"), []string{"legacy", "upstream"}, 0, useDropdown)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +64,7 @@ func interactiveCommandLanguageMode(in *bufio.Reader, out io.Writer, choice stri
 		}
 		if domain != "" {
 			args = append(args, "--domain", domain)
-			tlsChoice, err := selectInteractiveValue(in, out, tr(lang, "enable_tls"), []string{"no", "yes"}, 0, useDropdown)
+			tlsChoice, err := selectInteractiveValue(in, raw, out, tr(lang, "enable_tls"), []string{"no", "yes"}, 0, useDropdown)
 			if err != nil {
 				return nil, err
 			}
@@ -80,22 +83,22 @@ func interactiveCommandLanguageMode(in *bufio.Reader, out io.Writer, choice stri
 	return args, nil
 }
 
-func selectInteractiveValue(in *bufio.Reader, out io.Writer, label string, choices []string, selected int, useDropdown bool) (string, error) {
+func selectInteractiveValue(in lineInput, raw io.Reader, out io.Writer, label string, choices []string, selected int, useDropdown bool) (string, error) {
 	if useDropdown {
-		return dropdown(in, out, label, choices, selected)
+		return dropdown(raw, out, label, choices, selected)
 	}
 	return promptChoice(in, out, label, choices, choices[selected])
 }
 
-func interactiveConnection(in *bufio.Reader, out io.Writer) ([]string, error) {
+func interactiveConnection(in lineInput, out io.Writer) ([]string, error) {
 	return interactiveConnectionLanguage(in, out, langEN)
 }
 
-func interactiveConnectionLanguage(in *bufio.Reader, out io.Writer, lang uiLanguage) ([]string, error) {
-	return interactiveConnectionLanguageMode(in, out, lang, false)
+func interactiveConnectionLanguage(in lineInput, out io.Writer, lang uiLanguage) ([]string, error) {
+	return interactiveConnectionLanguageMode(in, nil, out, lang, false)
 }
 
-func interactiveConnectionLanguageMode(in *bufio.Reader, out io.Writer, lang uiLanguage, useDropdown bool) ([]string, error) {
+func interactiveConnectionLanguageMode(in lineInput, raw io.Reader, out io.Writer, lang uiLanguage, useDropdown bool) ([]string, error) {
 	host, err := prompt(in, out, tr(lang, "vds_address"), "")
 	if err != nil {
 		return nil, err
@@ -111,7 +114,7 @@ func interactiveConnectionLanguageMode(in *bufio.Reader, out io.Writer, lang uiL
 	if err != nil {
 		return nil, err
 	}
-	authMethod, err := selectInteractiveValue(in, out, tr(lang, "ssh_auth"), []string{"key", "password"}, 0, useDropdown)
+	authMethod, err := selectInteractiveValue(in, raw, out, tr(lang, "ssh_auth"), []string{"key", "password"}, 0, useDropdown)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +141,7 @@ func interactiveConnectionLanguageMode(in *bufio.Reader, out io.Writer, lang uiL
 	return args, nil
 }
 
-func prompt(in *bufio.Reader, out io.Writer, label, defaultValue string) (string, error) {
+func prompt(in lineInput, out io.Writer, label, defaultValue string) (string, error) {
 	if defaultValue != "" {
 		fmt.Fprintf(out, "%s [%s]: ", label, defaultValue)
 	} else {
@@ -158,7 +161,7 @@ func prompt(in *bufio.Reader, out io.Writer, label, defaultValue string) (string
 	return line, nil
 }
 
-func promptInt(in *bufio.Reader, out io.Writer, label string, defaultValue int) (int, error) {
+func promptInt(in lineInput, out io.Writer, label string, defaultValue int) (int, error) {
 	value, err := prompt(in, out, label, strconv.Itoa(defaultValue))
 	if err != nil {
 		return 0, err
@@ -170,7 +173,7 @@ func promptInt(in *bufio.Reader, out io.Writer, label string, defaultValue int) 
 	return parsed, nil
 }
 
-func promptChoice(in *bufio.Reader, out io.Writer, label string, choices []string, defaultValue string) (string, error) {
+func promptChoice(in lineInput, out io.Writer, label string, choices []string, defaultValue string) (string, error) {
 	fmt.Fprintf(out, "%s (%s)\n", label, strings.Join(choices, "/"))
 	value, err := prompt(in, out, "Choice", defaultValue)
 	if err != nil {
@@ -184,7 +187,7 @@ func promptChoice(in *bufio.Reader, out io.Writer, label string, choices []strin
 	return "", fmt.Errorf("choice must be one of %s", strings.Join(choices, ", "))
 }
 
-func confirm(in *bufio.Reader, out io.Writer, label string) bool {
+func confirm(in lineInput, out io.Writer, label string) bool {
 	value, err := prompt(in, out, label+"? type yes", "no")
 	return err == nil && strings.EqualFold(value, "yes")
 }

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -278,6 +277,27 @@ type uiPreferences struct {
 	Language uiLanguage `json:"language"`
 }
 
+// consoleInput reads one byte at a time so text prompts never read ahead of
+// Bubble Tea's raw-mode keyboard reader on Windows.
+type consoleInput struct{ in io.Reader }
+
+func (r *consoleInput) ReadString(delim byte) (string, error) {
+	var line []byte
+	var one [1]byte
+	for {
+		n, err := r.in.Read(one[:])
+		if n > 0 {
+			line = append(line, one[0])
+			if one[0] == delim {
+				return string(line), nil
+			}
+		}
+		if err != nil {
+			return string(line), err
+		}
+	}
+}
+
 func languagePreferencePath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -344,7 +364,7 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			fmt.Fprintln(out, "Warning: could not save UI language preference:", err)
 		}
 	}
-	reader := bufio.NewReader(in)
+	reader := &consoleInput{in: in}
 	for {
 		selection, err := runActionTUI(in, out, language)
 		if err != nil {
@@ -370,13 +390,13 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			usage(out)
 			continue
 		}
-		command, err := interactiveCommandTUI(reader, out, selection.action, selection.language)
+		command, err := interactiveCommandTUI(reader, in, out, selection.action, selection.language)
 		if err != nil {
 			if errors.Is(err, errTUIBack) {
 				continue
 			}
 			title, body := errorNotice(selection.language, selection.action, err)
-			if noticeErr := showNoticeTUI(reader, out, title, body); noticeErr != nil {
+			if noticeErr := showNoticeTUI(in, out, title, body); noticeErr != nil {
 				return noticeErr
 			}
 			continue
@@ -387,7 +407,7 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 		}
 		if err := runCommand(command, out, errOut); err != nil {
 			title, body := errorNotice(selection.language, selection.action, err)
-			if noticeErr := showNoticeTUI(reader, out, title, body); noticeErr != nil {
+			if noticeErr := showNoticeTUI(in, out, title, body); noticeErr != nil {
 				return noticeErr
 			}
 		} else {

@@ -44,6 +44,16 @@ func TestArgsEnableInteractivePasswordFallbackWithoutIdentity(t *testing.T) {
 	}
 }
 
+func TestArgsReuseOneAuthenticatedSSHConnection(t *testing.T) {
+	c := Client{Options: config.Options{Host: "vpn.example.com", User: "root", SSHPort: 22}, ControlPath: "C:\\Temp\\awg-vds-control"}
+	args := strings.Join(c.args(), " ")
+	for _, want := range []string{"ControlMaster=auto", "ControlPersist=120s", "ControlPath=C:\\Temp\\awg-vds-control"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("SSH args lack connection reuse option %q: %s", want, args)
+		}
+	}
+}
+
 func TestWriteRedactedFiltersStderr(t *testing.T) {
 	var out bytes.Buffer
 	writeRedacted(&out, "PASSWORD_HASH=secret\nstatus=healthy\n")
