@@ -6,6 +6,7 @@
 - Домен без `--tls` теперь отклоняется; TLS firewall закрывает прямой backend-порт и оставляет доступ только через proxy или разрешённый IP.
 - State записывается после успешного health-check, хранит deployed image и checksum последнего backup; update автоматически восстанавливает snapshot при ошибке.
 - Backup расширен до полного deployment snapshot; добавлены fake-SSH lifecycle tests и command-builder tests для P0-контрактов.
+- Повторный `install` теперь читает state до проверки занятых портов, принимает ожидаемый busy порт при безопасном reconcile и явно сообщает configuration drift вместо его молчаливого игнорирования.
 
 ## v2.0.0 — 2026-07-25
 

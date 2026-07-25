@@ -56,3 +56,15 @@ func TestTLSCommandUsesExplicitMode(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigurationDriftIsReported(t *testing.T) {
+	s := state.State{VPNPort: 1234, WebPort: 51821, Domain: "vpn.example.com", TLSMode: "caddy", RestrictPanelIP: "198.51.100.7"}
+	o := config.Options{VPNPort: 4321, WebPort: 51822, Domain: "other.example.com", TLS: false, RestrictIP: "198.51.100.8"}
+	diff := configurationDrift(s, o)
+	if len(diff) != 5 {
+		t.Fatalf("expected five drift fields, got %v", diff)
+	}
+	if !strings.Contains(strings.Join(diff, " "), "vpn-port") || !strings.Contains(strings.Join(diff, " "), "restrict-panel-ip") {
+		t.Fatalf("drift details are incomplete: %v", diff)
+	}
+}

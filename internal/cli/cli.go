@@ -123,14 +123,6 @@ func doctor(ctx context.Context, c remoteRunner, o config.Options, out io.Writer
 }
 
 func install(ctx context.Context, c remoteRunner, o config.Options, out io.Writer) error {
-	pre, err := c.Run(ctx, preflight.Command(o))
-	ssh.PrintOutput(out, pre)
-	if err != nil {
-		return err
-	}
-	if strings.Contains(pre, "PORT_TCP_") && strings.Contains(pre, "=busy") {
-		return errors.New("requested port is already occupied; inspect doctor output before installing")
-	}
 	old, found, err := readState(ctx, c)
 	if err != nil {
 		return err
@@ -139,8 +131,24 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 		if old.Engine != o.Engine {
 			return fmt.Errorf("refusing automatic migration from %s to %s; install the other engine as a separate new installation", old.Engine, o.Engine)
 		}
+		if diff := configurationDrift(old, o); len(diff) > 0 {
+			return fmt.Errorf("existing installation configuration differs: %s; rerun with the existing settings or use a future reconfigure flow", strings.Join(diff, ", "))
+		}
+		pre, err := c.Run(ctx, preflight.Command(o))
+		ssh.PrintOutput(out, pre)
+		if err != nil {
+			return err
+		}
 		fmt.Fprintln(out, "Existing installation found; reconciling the selected engine without replacing configuration.")
 		return reconcile(ctx, c, old, out)
+	}
+	pre, err := c.Run(ctx, preflight.Command(o))
+	ssh.PrintOutput(out, pre)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(pre, "PORT_TCP_") && strings.Contains(pre, "=busy") {
+		return errors.New("requested port is already occupied; inspect doctor output before installing")
 	}
 	if o.Engine == config.Upstream && strings.Contains(pre, "AMNEZIAWG=unsupported") {
 		return errors.New("upstream requires the AmneziaWG kernel module; doctor found no installed or installable module")
@@ -315,7 +323,31 @@ func newState(o config.Options) state.State {
 	if o.TLS {
 		tlsMode = "caddy"
 	}
-	return state.State{Version: 1, Engine: o.Engine, Image: image, Container: container, VPNPort: o.VPNPort, WebPort: o.WebPort, Domain: o.Domain, TLSMode: tlsMode, ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: now, UpdatedAt: now}
+	return state.State{Version: 1, Engine: o.Engine, Image: image, Container: container, VPNPort: o.VPNPort, WebPort: o.WebPort, Domain: o.Domain, PanelHost: hostForPanel(o), RestrictPanelIP: o.RestrictIP, TLSMode: tlsMode, ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: now, UpdatedAt: now}
+}
+
+func configurationDrift(s state.State, o config.Options) []string {
+	var diff []string
+	if s.VPNPort != o.VPNPort {
+		diff = append(diff, fmt.Sprintf("vpn-port state=%d requested=%d", s.VPNPort, o.VPNPort))
+	}
+	if s.WebPort != o.WebPort {
+		diff = append(diff, fmt.Sprintf("web-port state=%d requested=%d", s.WebPort, o.WebPort))
+	}
+	if s.Domain != o.Domain {
+		diff = append(diff, fmt.Sprintf("domain state=%q requested=%q", s.Domain, o.Domain))
+	}
+	wantTLS := "disabled"
+	if o.TLS {
+		wantTLS = "caddy"
+	}
+	if s.TLSMode != wantTLS {
+		diff = append(diff, fmt.Sprintf("tls state=%q requested=%q", s.TLSMode, wantTLS))
+	}
+	if s.RestrictPanelIP != o.RestrictIP && (s.RestrictPanelIP != "" || o.RestrictIP != "") {
+		diff = append(diff, fmt.Sprintf("restrict-panel-ip state=%q requested=%q", s.RestrictPanelIP, o.RestrictIP))
+	}
+	return diff
 }
 
 func dependenciesCommand(upstream bool) string {

@@ -20,6 +20,8 @@ type State struct {
 	VPNPort          int           `json:"vpn_port"`
 	WebPort          int           `json:"web_port"`
 	Domain           string        `json:"domain,omitempty"`
+	PanelHost        string        `json:"panel_host,omitempty"`
+	RestrictPanelIP  string        `json:"restrict_panel_ip,omitempty"`
 	TLSMode          string        `json:"tls_mode"`
 	ConfigPath       string        `json:"config_path"`
 	BackupPath       string        `json:"backup_path"`
