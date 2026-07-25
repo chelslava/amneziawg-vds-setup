@@ -14,6 +14,11 @@ type Engine string
 const (
 	Legacy   Engine = "legacy"
 	Upstream Engine = "upstream"
+
+	LegacyImage         = "ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f"
+	LegacyImageOldTag   = "ghcr.io/yokitoki/awg-easy:1.0.1"
+	UpstreamImage       = "ghcr.io/wg-easy/wg-easy@sha256:4ffc03c35dce5456bbb2fa6b136a1eeb196394548dee0650ae692efdd1062e01"
+	UpstreamImageOldTag = "ghcr.io/wg-easy/wg-easy:15.2.1"
 )
 
 type Options struct {

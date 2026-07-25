@@ -10,9 +10,9 @@ import (
 
 type legacyEngine struct{}
 
-func (legacyEngine) Name() config.Engine                   { return config.Legacy }
+func (legacyEngine) Name() config.Engine { return config.Legacy }
 func (legacyEngine) Image() string {
-	return "ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f"
+	return config.LegacyImage
 }
 func (legacyEngine) Container() string                     { return "awg-vds-legacy" }
 func (e legacyEngine) InstallCommand(s state.State) string { return engineCommand(e, s, true, false) }
@@ -23,9 +23,9 @@ func (e legacyEngine) StatusCommand(s state.State) string {
 
 type upstreamEngine struct{}
 
-func (upstreamEngine) Name() config.Engine                   { return config.Upstream }
+func (upstreamEngine) Name() config.Engine { return config.Upstream }
 func (upstreamEngine) Image() string {
-	return "ghcr.io/wg-easy/wg-easy@sha256:4ffc03c35dce5456bbb2fa6b136a1eeb196394548dee0650ae692efdd1062e01"
+	return config.UpstreamImage
 }
 func (upstreamEngine) Container() string                     { return "awg-vds-upstream" }
 func (e upstreamEngine) InstallCommand(s state.State) string { return engineCommand(e, s, true, true) }

@@ -5,12 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/config"
 )
 
 const Path = "/opt/awg-vds/install-state.json"
+
+const (
+	managedRoot       = "/opt/awg-vds"
+	managedConfigPath = "/opt/awg-vds/wireguard"
+	managedBackupPath = "/opt/awg-vds/backups"
+)
 
 type State struct {
 	Version          int           `json:"schema_version"`
@@ -41,6 +50,25 @@ func (s State) Validate() error {
 	if s.Image == "" || s.Container == "" || s.ConfigPath == "" || s.BackupPath == "" {
 		return fmt.Errorf("state is missing required fields")
 	}
+	wantContainer, wantImage, oldImage := "", "", ""
+	switch s.Engine {
+	case config.Legacy:
+		wantContainer, wantImage, oldImage = "awg-vds-legacy", config.LegacyImage, config.LegacyImageOldTag
+	case config.Upstream:
+		wantContainer, wantImage, oldImage = "awg-vds-upstream", config.UpstreamImage, config.UpstreamImageOldTag
+	}
+	if s.Container != wantContainer {
+		return fmt.Errorf("invalid container %q for engine %q", s.Container, s.Engine)
+	}
+	if s.Image != wantImage && s.Image != oldImage {
+		return fmt.Errorf("image %q is not allowed for engine %q", s.Image, s.Engine)
+	}
+	if s.ConfigPath != managedConfigPath || s.BackupPath != managedBackupPath {
+		return fmt.Errorf("state paths must use the managed deployment directories")
+	}
+	if !managedPath(s.ConfigPath) || !managedPath(s.BackupPath) {
+		return fmt.Errorf("state contains a path outside %s", managedRoot)
+	}
 	if s.VPNPort < 1 || s.VPNPort > 65535 || s.WebPort < 1 || s.WebPort > 65535 || s.VPNPort == s.WebPort {
 		return fmt.Errorf("invalid state ports")
 	}
@@ -50,10 +78,21 @@ func (s State) Validate() error {
 	if (s.TLSMode == "caddy") != (s.Domain != "") {
 		return fmt.Errorf("domain and TLS mode are inconsistent")
 	}
+	if s.RestrictPanelIP != "" && net.ParseIP(s.RestrictPanelIP) == nil {
+		return fmt.Errorf("invalid panel restriction IP")
+	}
+	if s.LastBackupPath != "" && (!managedPath(s.LastBackupPath) || !strings.HasPrefix(path.Clean(s.LastBackupPath), managedBackupPath+"/")) {
+		return fmt.Errorf("last backup path is outside the managed backup directory")
+	}
 	if (s.LastBackupPath == "") != (s.LastBackupSHA256 == "") {
 		return fmt.Errorf("backup metadata is incomplete")
 	}
 	return nil
+}
+
+func managedPath(value string) bool {
+	clean := path.Clean(value)
+	return clean == managedRoot || strings.HasPrefix(clean, managedRoot+"/")
 }
 
 func Encode(s State) ([]byte, error) {
