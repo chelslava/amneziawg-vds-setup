@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -30,10 +31,17 @@ type remoteRunner interface {
 }
 
 func Run(args []string, out, errOut io.Writer) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
+	if len(args) == 0 {
+		return interactiveMenu(bufio.NewReader(os.Stdin), out, errOut)
+	}
+	if args[0] == "help" || args[0] == "--help" {
 		usage(out)
 		return nil
 	}
+	return runCommand(args, out, errOut)
+}
+
+func runCommand(args []string, out, errOut io.Writer) error {
 	if containsSecretFlag(args) {
 		return errors.New("password flags are forbidden; SSH password authentication is interactive only")
 	}

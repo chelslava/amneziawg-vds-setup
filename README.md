@@ -32,6 +32,16 @@ awg-vds backup --host HOST [connection flags]
 awg-vds rotate-password --host HOST [connection flags]
 ```
 
+### Интерактивное меню
+
+Запуск без аргументов открывает line-oriented control center с меню Install, Status, Doctor, Update, Backup и Rotate password. Формы предлагают безопасные значения по умолчанию, позволяют выбрать `legacy`/`upstream`, домен, TLS и IP restriction, а destructive-действия требуют явного ввода `yes`.
+
+```text
+awg-vds
+```
+
+Меню не запрашивает и не сохраняет SSH-пароль: при выборе password authentication его запрашивает системный OpenSSH. Флаговый режим остаётся доступен для скриптов и CI.
+
 `status`, `update` и `backup` загружают настройки движка, портов, домена и путей из `/opt/awg-vds/install-state.json`. Для SSH всё равно нужны адрес сервера и параметры подключения. `update` сначала создаёт backup и только потом заменяет контейнер. Повторный `install` того же движка выполняет безопасное reconcile; смена движка автоматически запрещена.
 
 `update` создаёт snapshot перед заменой контейнера и автоматически восстанавливает его, если post-update health-check не проходит. Повторный `install` сначала читает state: неизменённая конфигурация безопасно reconcile-ится, а drift портов, домена, TLS или ограничения панели завершается явным diff.
