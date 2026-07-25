@@ -13,6 +13,10 @@
 - Doctor обновляет APT metadata перед upstream module probe, dependencies гарантируют `curl`, а package install и `modprobe` failures получают явные diagnostics.
 - Summary теперь показывает фактический panel URL с web port для HTTP и `https://domain` для TLS, а также отдельный внешний reachability probe.
 - Engine factory теперь использует canonical `internal/engine/legacy` и `internal/engine/upstream`; divergent `compat.go` удалён, включая старый `WG_HOST` и DNS contract.
+- Добавлен `rotate-password` с атомарной сменой credential, health-check и rollback без вывода plaintext.
+- CI отделён от release: Go test/vet, native Windows/Linux/macOS smoke, immutable-reference scan и pinned Pester 5.7.1 для v1 Legacy.
+- Добавлен manual disposable-VDS E2E harness для Ubuntu/Debian с pinned known_hosts и always-cleanup; provider provisioning остаётся настройкой GitHub environment.
+- APT dependency paths теперь fail-closed при insecure или unauthenticated repositories.
 
 ## v2.0.0 — 2026-07-25
 
