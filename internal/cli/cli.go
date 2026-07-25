@@ -120,6 +120,9 @@ func doctor(ctx context.Context, c remoteRunner, o config.Options, out io.Writer
 	if strings.Contains(result, "AMNEZIAWG=unsupported") {
 		return errors.New("upstream engine is unsupported: AmneziaWG module is neither installed nor available from configured repositories")
 	}
+	if strings.Contains(result, "AMNEZIAWG=repository-unavailable") {
+		return errors.New("upstream preflight could not refresh APT metadata; check repository connectivity and signatures")
+	}
 	return nil
 }
 
@@ -151,8 +154,8 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 	if strings.Contains(pre, "PORT_TCP_") && strings.Contains(pre, "=busy") {
 		return errors.New("requested port is already occupied; inspect doctor output before installing")
 	}
-	if o.Engine == config.Upstream && strings.Contains(pre, "AMNEZIAWG=unsupported") {
-		return errors.New("upstream requires the AmneziaWG kernel module; doctor found no installed or installable module")
+	if o.Engine == config.Upstream && (strings.Contains(pre, "AMNEZIAWG=unsupported") || strings.Contains(pre, "AMNEZIAWG=repository-unavailable")) {
+		return errors.New("upstream requires the AmneziaWG kernel module; doctor found no supported installed or installable module")
 	}
 	if result, err := c.Run(ctx, dependenciesCommand(o.Engine == config.Upstream)); err != nil {
 		ssh.PrintOutput(out, result)
@@ -352,9 +355,9 @@ func configurationDrift(s state.State, o config.Options) []string {
 }
 
 func dependenciesCommand(upstream bool) string {
-	cmd := "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; command -v docker >/dev/null 2>&1 || (apt-get update; apt-get install -y ca-certificates apache2-utils openssl docker.io docker-compose-plugin); command -v htpasswd >/dev/null 2>&1 || apt-get install -y apache2-utils; command -v openssl >/dev/null 2>&1 || apt-get install -y openssl; systemctl enable --now docker; "
+	cmd := "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; command -v docker >/dev/null 2>&1 || (apt-get update; apt-get install -y ca-certificates apache2-utils openssl curl docker.io docker-compose-plugin); command -v htpasswd >/dev/null 2>&1 || apt-get install -y apache2-utils; command -v openssl >/dev/null 2>&1 || apt-get install -y openssl; command -v curl >/dev/null 2>&1 || (apt-get update; apt-get install -y curl); systemctl enable --now docker; "
 	if upstream {
-		cmd += "if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then apt-get update; apt-get install -y amneziawg; modprobe amneziawg || true; fi; "
+		cmd += "if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then apt-get update; if ! apt-get install -y amneziawg; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi; if module_error=$(modprobe amneziawg 2>&1); then printf 'AMNEZIAWG=module-loaded\\n'; else printf 'AMNEZIAWG=module-load-failed %s\\n' \"$module_error\" >&2; exit 1; fi; fi; "
 	}
 	return cmd + "printf 'DEPENDENCIES=ok\\n'"
 }

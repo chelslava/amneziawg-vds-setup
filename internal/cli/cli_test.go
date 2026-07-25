@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/config"
+	"github.com/chelslava/amneziawg-vds-setup/v2/internal/preflight"
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/state"
 	tlsengine "github.com/chelslava/amneziawg-vds-setup/v2/internal/tls"
 )
@@ -66,5 +67,47 @@ func TestConfigurationDriftIsReported(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(diff, " "), "vpn-port") || !strings.Contains(strings.Join(diff, " "), "restrict-panel-ip") {
 		t.Fatalf("drift details are incomplete: %v", diff)
+	}
+}
+
+func TestInstallValidationTLSMatrix(t *testing.T) {
+	tests := []struct {
+		name   string
+		domain string
+		tls    bool
+		want   string
+	}{
+		{name: "host only"},
+		{name: "domain with tls", domain: "vpn.example.com", tls: true},
+		{name: "domain without tls", domain: "vpn.example.com", want: "requires --tls"},
+		{name: "tls without domain", tls: true, want: "requires --domain"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := config.Options{Host: "192.0.2.1", User: "root", SSHPort: 22, Engine: config.Legacy, VPNPort: 1234, WebPort: 51821, Domain: tt.domain, TLS: tt.tls}
+			err := o.ValidateInstall()
+			if tt.want == "" && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+			if tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
+				t.Fatalf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestUpstreamPreflightRefreshesMetadata(t *testing.T) {
+	cmd := preflight.Command(config.Options{Engine: config.Upstream, WebPort: 51821, VPNPort: 1234})
+	if !strings.Contains(cmd, "apt-get update -qq") || !strings.Contains(cmd, "AMNEZIAWG=repository-unavailable") {
+		t.Fatalf("upstream preflight lacks deterministic repository diagnostics: %s", cmd)
+	}
+}
+
+func TestDependenciesIncludeHealthAndModuleDiagnostics(t *testing.T) {
+	cmd := dependenciesCommand(true)
+	for _, want := range []string{"apt-get install -y curl", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("dependency command lacks %q: %s", want, cmd)
+		}
 	}
 }

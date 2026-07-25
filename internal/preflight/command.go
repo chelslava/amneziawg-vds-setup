@@ -21,7 +21,7 @@ func Command(o config.Options) string {
 		fmt.Fprintf(&b, "getent hosts %s >/dev/null 2>&1 && printf 'DNS=ok\\n' || printf 'DNS=unresolved\\n'; ", quote(o.Domain))
 	}
 	if o.Engine == config.Upstream {
-		b.WriteString("if test -e /sys/module/amneziawg || command -v awg >/dev/null 2>&1; then printf 'AMNEZIAWG=present\\n'; elif apt-cache policy amneziawg 2>/dev/null | grep -q 'Candidate: [^()]'; then printf 'AMNEZIAWG=installable\\n'; else printf 'AMNEZIAWG=unsupported\\n'; fi; ")
+		b.WriteString("if test -e /sys/module/amneziawg || command -v awg >/dev/null 2>&1; then printf 'AMNEZIAWG=present\\n'; elif apt-get update -qq >/dev/null 2>&1; then if apt-cache policy amneziawg 2>/dev/null | grep -q 'Candidate: [^()]'; then printf 'AMNEZIAWG=installable\\n'; else printf 'AMNEZIAWG=unsupported\\n'; fi; else printf 'AMNEZIAWG=repository-unavailable\\n'; fi; ")
 	}
 	b.WriteString("printf 'PREFLIGHT=ok\\n'")
 	return b.String()
