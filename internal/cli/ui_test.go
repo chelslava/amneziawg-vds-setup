@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -75,5 +76,44 @@ func TestTUILanguageSelectionPrecedesActionMenu(t *testing.T) {
 	model = updated.(tuiModel)
 	if model.choice.action != "status" {
 		t.Fatalf("action selection was not applied: %+v", model)
+	}
+}
+
+func TestTUILanguageOnlyScreenReturnsAfterSelection(t *testing.T) {
+	model := tuiModel{languageOnly: true}
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(tuiModel)
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(tuiModel)
+	if command == nil || model.choice.language != langRU || model.step != 0 {
+		t.Fatalf("language screen did not finish cleanly: model=%+v command=%v", model, command)
+	}
+}
+
+func TestUIPreferencesRoundTripContainsOnlyLanguage(t *testing.T) {
+	b, err := json.Marshal(uiPreferences{Language: langRU})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"language":"ru"}` {
+		t.Fatalf("unexpected preference payload: %s", b)
+	}
+	var got uiPreferences
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Language != langRU {
+		t.Fatalf("language was not persisted in preferences model: %+v", got)
+	}
+	if err := saveLanguagePreference(uiLanguage("xx")); err == nil {
+		t.Fatal("unsupported language should be rejected")
+	}
+}
+
+func TestInstallProgressRendersStageAndCompletionBar(t *testing.T) {
+	var out strings.Builder
+	installStep(&out, 9, 9, "Saving installation state")
+	if !strings.Contains(out.String(), "[████████████████████] 9/9") || !strings.Contains(out.String(), "Saving installation state") {
+		t.Fatalf("progress output is incomplete: %q", out.String())
 	}
 }

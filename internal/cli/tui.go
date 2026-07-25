@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,14 +25,15 @@ type tuiSelection struct {
 }
 
 type tuiModel struct {
-	step     int
-	selected int
-	choice   tuiSelection
+	step         int
+	languageOnly bool
+	selected     int
+	choice       tuiSelection
 }
 
 var languageChoices = []string{"English", "Русский"}
-var actionChoices = []string{"Install / reconcile", "Status", "Doctor", "Update", "Backup", "Rotate panel password", "CLI help", "Exit"}
-var actionChoicesRU = []string{"Установка / reconcile", "Статус", "Диагностика", "Обновление", "Резервная копия", "Смена пароля панели", "Справка CLI", "Выход"}
+var actionChoices = []string{"Install / reconcile", "Status", "Doctor", "Update", "Backup", "Rotate panel password", "Change language", "CLI help", "Exit"}
+var actionChoicesRU = []string{"Установка / reconcile", "Статус", "Диагностика", "Обновление", "Резервная копия", "Смена пароля панели", "Сменить язык", "Справка CLI", "Выход"}
 
 func (m tuiModel) Init() tea.Cmd { return nil }
 
@@ -59,6 +63,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.choice.language = langEN
 			if m.selected == 1 {
 				m.choice.language = langRU
+			}
+			if m.languageOnly {
+				return m, tea.Quit
 			}
 			m.step = 1
 			m.selected = 0
@@ -111,36 +118,127 @@ func writeChoice(b *strings.Builder, selected bool, label string) {
 }
 
 func actionFromIndex(index int) string {
-	return []string{"install", "status", "doctor", "update", "backup", "rotate-password", "help", "exit"}[index]
+	return []string{"install", "status", "doctor", "update", "backup", "rotate-password", "change-language", "help", "exit"}[index]
 }
 
 func runTUI(in io.Reader, out io.Writer) (tuiSelection, error) {
-	final, err := tea.NewProgram(tuiModel{}, tea.WithInput(in), tea.WithOutput(out)).Run()
+	final, err := tea.NewProgram(tuiModel{step: 0, languageOnly: true}, tea.WithInput(in), tea.WithOutput(out)).Run()
 	if err != nil {
 		return tuiSelection{}, err
 	}
 	return final.(tuiModel).choice, nil
 }
 
+func runActionTUI(in io.Reader, out io.Writer, lang uiLanguage) (tuiSelection, error) {
+	final, err := tea.NewProgram(tuiModel{step: 1, choice: tuiSelection{language: lang}}, tea.WithInput(in), tea.WithOutput(out)).Run()
+	if err != nil {
+		return tuiSelection{}, err
+	}
+	return final.(tuiModel).choice, nil
+}
+
+type uiPreferences struct {
+	Language uiLanguage `json:"language"`
+}
+
+func languagePreferencePath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "awg-vds", "preferences.json"), nil
+}
+
+func loadLanguagePreference() (uiLanguage, error) {
+	path, err := languagePreferencePath()
+	if err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var preferences uiPreferences
+	if err := json.Unmarshal(b, &preferences); err != nil {
+		return "", fmt.Errorf("read UI preferences: %w", err)
+	}
+	if preferences.Language != langEN && preferences.Language != langRU {
+		return "", nil
+	}
+	return preferences.Language, nil
+}
+
+func saveLanguagePreference(lang uiLanguage) error {
+	if lang != langEN && lang != langRU {
+		return fmt.Errorf("unsupported UI language %q", lang)
+	}
+	path, err := languagePreferencePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(uiPreferences{Language: lang}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0600)
+}
+
 func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
-	for {
+	language, err := loadLanguagePreference()
+	if err != nil {
+		language = langEN
+	}
+	if language == "" {
 		selection, err := runTUI(in, out)
+		if err != nil {
+			return err
+		}
+		if selection.language == "" {
+			return nil
+		}
+		language = selection.language
+		if err := saveLanguagePreference(language); err != nil {
+			fmt.Fprintln(out, "Warning: could not save UI language preference:", err)
+		}
+	}
+	reader := bufio.NewReader(in)
+	for {
+		selection, err := runActionTUI(in, out, language)
 		if err != nil {
 			return err
 		}
 		if selection.action == "exit" || selection.action == "" {
 			return nil
 		}
+		if selection.action == "change-language" {
+			selected, err := runTUI(in, out)
+			if err != nil {
+				return err
+			}
+			if selected.language != "" {
+				language = selected.language
+				if err := saveLanguagePreference(language); err != nil {
+					fmt.Fprintln(out, "Warning: could not save UI language preference:", err)
+				}
+			}
+			continue
+		}
 		if selection.action == "help" {
 			usage(out)
 			continue
 		}
-		command, err := interactiveCommandLanguage(bufio.NewReader(in), out, selection.action, selection.language)
+		command, err := interactiveCommandLanguage(reader, out, selection.action, selection.language)
 		if err != nil {
 			fmt.Fprintln(out, tr(selection.language, "operation_failed"), err)
 			continue
 		}
-		if (command[0] == "install" || command[0] == "update" || command[0] == "rotate-password") && !confirm(bufio.NewReader(in), out, tr(selection.language, "proceed")) {
+		if (command[0] == "install" || command[0] == "update" || command[0] == "rotate-password") && !confirm(reader, out, tr(selection.language, "proceed")) {
 			fmt.Fprintln(out, tr(selection.language, "cancelled"))
 			continue
 		}
@@ -148,6 +246,7 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			fmt.Fprintln(out, tr(selection.language, "operation_failed"), err)
 		} else {
 			fmt.Fprintln(out, tr(selection.language, "operation_completed"))
+			fmt.Fprintln(out, tr(selection.language, "return_menu"))
 		}
 	}
 }

@@ -4,7 +4,7 @@
 
 ## Установка бинарника
 
-Скачайте архив для своей платформы из [GitHub Release v2.2.0](https://github.com/chelslava/amneziawg-vds-setup/releases/tag/v2.2.0), проверьте `SHA256SUMS` и добавьте `awg-vds` в `PATH`.
+Скачайте архив для своей платформы из [GitHub Release v2.2.1](https://github.com/chelslava/amneziawg-vds-setup/releases/tag/v2.2.1), проверьте `SHA256SUMS` и добавьте `awg-vds` в `PATH`.
 
 Для сборки из исходников нужен Go 1.25+:
 
@@ -34,7 +34,9 @@ awg-vds rotate-password --host HOST [connection flags]
 
 ### Интерактивное меню
 
-Запуск без аргументов открывает line-oriented control center с меню Install, Status, Doctor, Update, Backup и Rotate password. В форме подключения есть отдельный выбор SSH auth method: `key` или `password`; при `password` пароль вводится следующим prompt’ом самого OpenSSH и не читается приложением. Формы предлагают безопасные значения по умолчанию, позволяют выбрать `legacy`/`upstream`, домен, TLS и IP restriction, а destructive-действия требуют явного ввода `yes`.
+Запуск без аргументов открывает современный keyboard-driven control center на Bubble Tea v2. При первом запуске выбирается English или Русский; выбор сохраняется локально в профиле пользователя (только язык, без серверных секретов) и больше не запрашивается. Сменить язык можно пунктом `Change language` / `Сменить язык`. В форме подключения есть отдельный выбор SSH auth method: `key` или `password`; при `password` пароль вводится следующим prompt’ом самого OpenSSH и не читается приложением. Формы предлагают безопасные значения по умолчанию, позволяют выбрать `legacy`/`upstream`, домен, TLS и IP restriction, а destructive-действия требуют явного ввода `yes`.
+
+Установка в интерактивном режиме показывает пошаговый прогресс: preflight, зависимости, конфигурация, запуск контейнера, TLS/firewall, health-check и сохранение state. После завершения (или ошибки) интерфейс возвращает пользователя в главное меню, а не завершает приложение.
 
 ```text
 awg-vds

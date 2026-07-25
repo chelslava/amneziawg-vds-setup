@@ -116,9 +116,18 @@ func TestPanelURLUsesPersistedHostAndPort(t *testing.T) {
 
 func TestDependenciesIncludeHealthAndModuleDiagnostics(t *testing.T) {
 	cmd := dependenciesCommand(true)
-	for _, want := range []string{"APT::Get::AllowUnauthenticated=false install -y curl", "Acquire::AllowInsecureRepositories=false", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
+	for _, want := range []string{"APT::Get::AllowUnauthenticated=false install -y curl", "Acquire::AllowInsecureRepositories=false", "docker-compose-plugin docker-compose-v2 docker-compose", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("dependency command lacks %q: %s", want, cmd)
+		}
+	}
+}
+
+func TestInstallHealthUsesRetryWindow(t *testing.T) {
+	cmd := healthRetryCommand(state.State{Container: "awg-vds-legacy", Image: config.LegacyImage, VPNPort: 1234, WebPort: 51821})
+	for _, want := range []string{"while test $attempt -le 6", "sleep 5", "docker inspect", "exit 1"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("health retry command lacks %q: %s", want, cmd)
 		}
 	}
 }

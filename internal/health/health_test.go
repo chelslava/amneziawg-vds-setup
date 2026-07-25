@@ -14,4 +14,7 @@ func TestHealthChecksRuntimeImageAgainstState(t *testing.T) {
 	if !strings.Contains(cmd, "{{.Config.Image}}") || !strings.Contains(cmd, "ghcr.io/example/awg:1.0.0") {
 		t.Fatalf("health command does not verify the persisted image: %s", cmd)
 	}
+	if !strings.Contains(cmd, "ss -lunH | awk '{print $4}'") {
+		t.Fatalf("UDP health check must inspect local address: %s", cmd)
+	}
 }

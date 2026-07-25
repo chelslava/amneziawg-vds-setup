@@ -139,6 +139,8 @@ func doctor(ctx context.Context, c remoteRunner, o config.Options, out io.Writer
 }
 
 func install(ctx context.Context, c remoteRunner, o config.Options, out io.Writer) error {
+	const totalSteps = 9
+	installStep(out, 1, totalSteps, "Checking existing installation state")
 	old, found, err := readState(ctx, c)
 	if err != nil {
 		return err
@@ -151,6 +153,7 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 			return fmt.Errorf("existing installation configuration differs: %s; rerun with the existing settings or use a future reconfigure flow", strings.Join(diff, ", "))
 		}
 		pre, err := c.Run(ctx, preflight.Command(o))
+		installStep(out, 2, totalSteps, "Running preflight checks")
 		ssh.PrintOutput(out, pre)
 		if err != nil {
 			return err
@@ -158,6 +161,7 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 		fmt.Fprintln(out, "Existing installation found; reconciling the selected engine without replacing configuration.")
 		return reconcile(ctx, c, old, out)
 	}
+	installStep(out, 2, totalSteps, "Running preflight checks")
 	pre, err := c.Run(ctx, preflight.Command(o))
 	ssh.PrintOutput(out, pre)
 	if err != nil {
@@ -169,38 +173,59 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 	if o.Engine == config.Upstream && (strings.Contains(pre, "AMNEZIAWG=unsupported") || strings.Contains(pre, "AMNEZIAWG=repository-unavailable")) {
 		return errors.New("upstream requires the AmneziaWG kernel module; doctor found no supported installed or installable module")
 	}
+	installStep(out, 3, totalSteps, "Preparing Docker and AmneziaWG dependencies")
 	if result, err := c.Run(ctx, dependenciesCommand(o.Engine == config.Upstream)); err != nil {
 		ssh.PrintOutput(out, result)
 		return err
 	}
 	s := newState(o)
+	installStep(out, 4, totalSteps, "Preparing protected service configuration")
 	if result, err := c.Run(ctx, envCommand(o, s)); err != nil {
 		ssh.PrintOutput(out, result)
 		return err
 	}
 	e, _ := engine.Select(o.Engine)
+	installStep(out, 5, totalSteps, "Starting the selected VPN engine")
 	if result, err := c.Run(ctx, e.InstallCommand(s)); err != nil {
 		ssh.PrintOutput(out, result)
 		return err
 	}
+	installStep(out, 6, totalSteps, "Configuring panel TLS")
 	if result, err := c.Run(ctx, tlsengine.Command(o.TLS, o.Domain, o.WebPort)); err != nil {
 		ssh.PrintOutput(out, result)
 		return err
 	}
+	installStep(out, 7, totalSteps, "Configuring firewall and port access")
 	if result, err := c.Run(ctx, firewall.Command(o.VPNPort, o.WebPort, o.TLS, o.RestrictIP)); err != nil {
 		ssh.PrintOutput(out, result)
 		return err
 	}
-	if result, err := c.Run(ctx, health.Command(s)); err != nil {
+	installStep(out, 8, totalSteps, "Checking containers, HTTP panel, and UDP listener")
+	if result, err := c.Run(ctx, healthRetryCommand(s)); err != nil {
 		ssh.PrintOutput(out, result)
 		return fmt.Errorf("post-install health check failed: %w", err)
 	}
 	s.UpdatedAt = time.Now().UTC()
+	installStep(out, 9, totalSteps, "Saving installation state")
 	if err := writeState(ctx, c, s); err != nil {
 		return err
 	}
 	printSummary(out, s)
 	return nil
+}
+
+func healthRetryCommand(s state.State) string {
+	check := health.Command(s)
+	return fmt.Sprintf("set -eu; attempt=1; while test $attempt -le 6; do if %s; then exit 0; fi; sleep 5; attempt=$((attempt+1)); done; exit 1", check)
+}
+
+func installStep(out io.Writer, current, total int, label string) {
+	if out == nil {
+		return
+	}
+	filled := current * 20 / total
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", 20-filled)
+	fmt.Fprintf(out, "\n[%s] %d/%d  %s\n", bar, current, total, label)
 }
 
 func existing(ctx context.Context, c remoteRunner, o config.Options, out io.Writer, action string) error {
@@ -404,7 +429,7 @@ func configurationDrift(s state.State, o config.Options) []string {
 func dependenciesCommand(upstream bool) string {
 	aptUpdate := "apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update"
 	aptInstall := "apt-get -o APT::Get::AllowUnauthenticated=false install -y"
-	cmd := fmt.Sprintf("set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; command -v docker >/dev/null 2>&1 || (%s; %s ca-certificates apache2-utils openssl curl docker.io docker-compose-plugin); command -v htpasswd >/dev/null 2>&1 || %s apache2-utils; command -v openssl >/dev/null 2>&1 || %s openssl; command -v curl >/dev/null 2>&1 || (%s; %s curl); systemctl enable --now docker; ", aptUpdate, aptInstall, aptInstall, aptInstall, aptUpdate, aptInstall)
+	cmd := fmt.Sprintf("set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; %s; command -v docker >/dev/null 2>&1 || %s ca-certificates apache2-utils openssl curl docker.io; if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then compose_pkg=; for package in docker-compose-plugin docker-compose-v2 docker-compose; do if apt-cache show \"$package\" >/dev/null 2>&1; then compose_pkg=\"$package\"; break; fi; done; test -n \"$compose_pkg\"; %s \"$compose_pkg\"; fi; command -v htpasswd >/dev/null 2>&1 || %s apache2-utils; command -v openssl >/dev/null 2>&1 || %s openssl; command -v curl >/dev/null 2>&1 || %s curl; systemctl enable --now docker; ", aptUpdate, aptInstall, aptInstall, aptInstall, aptInstall, aptInstall)
 	if upstream {
 		cmd += fmt.Sprintf("if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then %s; if ! %s amneziawg; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi; if module_error=$(modprobe amneziawg 2>&1); then printf 'AMNEZIAWG=module-loaded\\n'; else printf 'AMNEZIAWG=module-load-failed %%s\\n' \"$module_error\" >&2; exit 1; fi; fi; ", aptUpdate, aptInstall)
 	}
@@ -506,7 +531,7 @@ func externalPanelStatus(s state.State) string {
 	return fmt.Sprintf("reachable (HTTP %d)", resp.StatusCode)
 }
 func usage(out io.Writer) {
-	fmt.Fprintln(out, "awg-vds v2.0.0 — cross-platform AmneziaWG VDS installer")
+	fmt.Fprintln(out, "awg-vds v2.2.1 — cross-platform AmneziaWG VDS installer")
 	fmt.Fprintln(out, "Commands: install, status, update, backup, rotate-password, doctor")
 	fmt.Fprintln(out, "Common flags: --host HOST --ssh-port 22 --user root --identity-file PATH --known-hosts PATH")
 	fmt.Fprintln(out, "Install flags: --engine legacy|upstream --vpn-port 1234 --web-port 51821 --domain NAME --tls --restrict-panel-ip IP")
