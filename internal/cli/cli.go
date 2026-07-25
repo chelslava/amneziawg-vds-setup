@@ -321,7 +321,7 @@ func readPanelPasswordTUI(ctx context.Context, args []string, password string, e
 
 func healthRetryCommand(s state.State) string {
 	check := health.Command(s)
-	return fmt.Sprintf("set -eu; attempt=1; while test $attempt -le 6; do if %s; then exit 0; fi; sleep 5; attempt=$((attempt+1)); done; exit 1", check)
+	return fmt.Sprintf("set -eu; attempt=1; while test $attempt -le 6; do if %s; then stable=1; while test $stable -lt 3; do sleep 2; %s; stable=$((stable+1)); done; exit 0; fi; sleep 5; attempt=$((attempt+1)); done; exit 1", check, check)
 }
 
 func installStep(out io.Writer, current, total int, label string) {
@@ -623,7 +623,11 @@ func errOut(out io.Writer) io.Writer { return out }
 func printSummary(out io.Writer, s state.State) {
 	fmt.Fprintf(out, "Panel: %s\nVPN: UDP %d\nEngine: %s\nBackups: %s\nState: %s\n", panelURL(s), s.VPNPort, s.Engine, s.BackupPath, state.Path)
 	if s.PanelHost != "" {
-		fmt.Fprintln(out, "External panel:", externalPanelStatus(s))
+		external := externalPanelStatus(s)
+		fmt.Fprintln(out, "External panel:", external)
+		if strings.HasPrefix(external, "unreachable") {
+			fmt.Fprintln(out, "WARNING: external panel check failed; verify UFW/firewalld, provider security-group rules, and that the panel is not bound to localhost.")
+		}
 	} else {
 		fmt.Fprintln(out, "External panel: not checked (state has no panel host metadata)")
 	}
