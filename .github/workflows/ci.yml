@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-quality:
+    name: Go quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+
+  native-smoke:
+    name: Native smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: Build and run help
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go build -trimpath -o dist/awg-vds ./cmd/awg-vds
+          ./dist/awg-vds --help
+      - name: Test
+        run: go test ./...
+
+  legacy-v1:
+    name: Legacy v1 PowerShell contract
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install pinned Pester
+        shell: pwsh
+        run: Install-Module -Name Pester -RequiredVersion 5.5.1 -Force -SkipPublisherCheck -Scope CurrentUser
+      - name: Run Pester
+        shell: pwsh
+        run: Invoke-Pester -Path tests -CI
+
+  immutable-references:
+    name: Immutable production references
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Reject mutable references in v2 and workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE --include='*.go' --exclude='*_test.go' ':[[:space:]]*latest|uses:.*@v[0-9]' internal .github; then
+            echo 'mutable production reference found' >&2
+            exit 1
+          fi
