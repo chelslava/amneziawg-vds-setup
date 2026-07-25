@@ -45,6 +45,13 @@ func TestArgsEnableInteractivePasswordFallbackWithoutIdentity(t *testing.T) {
 	}
 }
 
+func TestRemoteCommandsUseSystemPath(t *testing.T) {
+	command := withSystemPath("command -v docker")
+	if !strings.Contains(command, "/usr/bin") || !strings.HasPrefix(command, "export PATH=") || !strings.HasSuffix(command, "command -v docker") {
+		t.Fatalf("remote command did not receive system PATH: %q", command)
+	}
+}
+
 func TestArgsReuseOneAuthenticatedSSHConnection(t *testing.T) {
 	c := Client{Options: config.Options{Host: "vpn.example.com", User: "root", SSHPort: 22}, ControlPath: "C:\\Temp\\awg-vds-control"}
 	args := strings.Join(c.args(), " ")

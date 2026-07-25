@@ -117,6 +117,10 @@ func (c *Client) Run(ctx context.Context, command string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// Non-interactive SSH sessions may receive a restricted PATH from the
+	// server's sshd/PAM configuration. Keep administration binaries discoverable
+	// without relying on a user's shell profile.
+	command = withSystemPath(command)
 	args := append(c.args(), command)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Stdin = c.Stdin
@@ -158,6 +162,10 @@ func (c *Client) Run(ctx context.Context, command string) (string, error) {
 		writeRedacted(stderrTarget, stderr.String())
 	}
 	return sanitize(stdout.String()), nil
+}
+
+func withSystemPath(command string) string {
+	return "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; " + command
 }
 
 type redactedWriter struct{ w io.Writer }
