@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.22'
+          go-version: '1.24.x'
           cache: true
       - name: Test
         run: go test ./...
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.22'
+          go-version: '1.24.x'
           cache: true
       - name: Build and run help
         shell: bash
@@ -60,9 +60,8 @@ jobs:
       - name: Install pinned Pester
         shell: pwsh
         run: |
-          Register-PSRepository -Default -ErrorAction SilentlyContinue
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module -Name Pester -RequiredVersion 5.5.1 -Force -SkipPublisherCheck -Scope CurrentUser
+          Set-PSResourceRepository -Name PSGallery -Trusted
+          Install-PSResource -Name Pester -Version 5.5.1 -Repository PSGallery -TrustRepository -Scope CurrentUser
       - name: Run Pester
         shell: pwsh
         run: Invoke-Pester -Path tests -CI
