@@ -60,6 +60,7 @@ jobs:
       - name: Install pinned Pester
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'PSResourceGet') | Out-Null
           Set-PSResourceRepository -Name PSGallery -Trusted
           Install-PSResource -Name Pester -Version 5.5.1 -Repository PSGallery -TrustRepository -Scope CurrentUser
       - name: Run Pester
