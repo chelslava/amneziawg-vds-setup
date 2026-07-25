@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/config"
+	legacyengine "github.com/chelslava/amneziawg-vds-setup/v2/internal/engine/legacy"
+	upstreamengine "github.com/chelslava/amneziawg-vds-setup/v2/internal/engine/upstream"
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/state"
 )
 
@@ -19,9 +21,9 @@ type Engine interface {
 func Select(kind config.Engine) (Engine, error) {
 	switch kind {
 	case config.Legacy:
-		return legacyEngine{}, nil
+		return legacyengine.Engine{}, nil
 	case config.Upstream:
-		return upstreamEngine{}, nil
+		return upstreamengine.Engine{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported engine %q", kind)
 	}

@@ -12,6 +12,7 @@
 - State validation теперь ограничивает engine-specific container/image contracts, managed paths под `/opt/awg-vds`, panel IP и backup metadata; tampered lifecycle state отклоняется до выполнения remote command.
 - Doctor обновляет APT metadata перед upstream module probe, dependencies гарантируют `curl`, а package install и `modprobe` failures получают явные diagnostics.
 - Summary теперь показывает фактический panel URL с web port для HTTP и `https://domain` для TLS, а также отдельный внешний reachability probe.
+- Engine factory теперь использует canonical `internal/engine/legacy` и `internal/engine/upstream`; divergent `compat.go` удалён, включая старый `WG_HOST` и DNS contract.
 
 ## v2.0.0 — 2026-07-25
 
