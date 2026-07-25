@@ -51,7 +51,7 @@ func TestInteractivePasswordAuthDoesNotCreatePasswordArgument(t *testing.T) {
 	if strings.Contains(strings.ToLower(joined), "password") || strings.Contains(joined, "identity-file") {
 		t.Fatalf("password auth leaked into command arguments: %s", joined)
 	}
-	if !strings.Contains(out.String(), "requested interactively by OpenSSH") {
+	if !strings.Contains(out.String(), "request the SSH password once without echo") {
 		t.Fatalf("password auth guidance missing: %s", out.String())
 	}
 }

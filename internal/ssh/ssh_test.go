@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -51,6 +52,21 @@ func TestArgsReuseOneAuthenticatedSSHConnection(t *testing.T) {
 		if !strings.Contains(args, want) {
 			t.Fatalf("SSH args lack connection reuse option %q: %s", want, args)
 		}
+	}
+}
+
+func TestWindowsDoesNotEnableUnixControlSocket(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Win32-OpenSSH behavior only applies on Windows")
+	}
+	c := Client{Options: config.Options{Host: "vpn.example.com", User: "root", SSHPort: 22}}
+	cleanup, err := c.EnableConnectionReuse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if c.ControlPath != "" {
+		t.Fatalf("Windows client must not configure ControlPath: %q", c.ControlPath)
 	}
 }
 

@@ -59,6 +59,7 @@ func runCommand(args []string, out, errOut io.Writer) error {
 		return err
 	}
 	c := ssh.Client{Options: o, Stdin: os.Stdin, Stderr: errOut}
+	defer c.ForgetPassword()
 	cleanupSSH, err := c.EnableConnectionReuse()
 	if err != nil {
 		return fmt.Errorf("prepare SSH connection reuse: %w", err)
@@ -67,17 +68,17 @@ func runCommand(args []string, out, errOut io.Writer) error {
 	ctx := context.Background()
 	switch o.Command {
 	case "doctor":
-		return doctor(ctx, c, o, out)
+		return doctor(ctx, &c, o, out)
 	case "install":
-		return install(ctx, c, o, out)
+		return install(ctx, &c, o, out)
 	case "status":
-		return existing(ctx, c, o, out, "status")
+		return existing(ctx, &c, o, out, "status")
 	case "update":
-		return existing(ctx, c, o, out, "update")
+		return existing(ctx, &c, o, out, "update")
 	case "backup":
-		return existing(ctx, c, o, out, "backup")
+		return existing(ctx, &c, o, out, "backup")
 	case "rotate-password":
-		return existing(ctx, c, o, out, "rotate-password")
+		return existing(ctx, &c, o, out, "rotate-password")
 	default:
 		return fmt.Errorf("unknown command %q (use install, status, update, backup, rotate-password, or doctor)", o.Command)
 	}

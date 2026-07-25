@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Исправлен Windows-сбой `getsockname failed: Not a socket`: `ControlPath` теперь
+  используется только на Unix, а пароль вводится один раз без echo через
+  временный askpass-helper, только в памяти текущей операции.
+- Добавлен regression-тест, запрещающий Unix control socket на Windows.
+
 ## v2.2.4 — 2026-07-25
 
 - SSH-команды установки используют временный ControlMaster/ControlPath, поэтому пароль запрашивается один раз за операцию.

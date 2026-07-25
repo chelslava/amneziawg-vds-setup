@@ -13,7 +13,7 @@ go test ./...
 $env:GOOS='windows'; $env:GOARCH='amd64'; go build -trimpath -ldflags='-s -w' -o dist/awg-vds-windows-amd64.exe ./cmd/awg-vds
 ```
 
-Поддерживаемые артефакты: Windows amd64, Linux amd64, macOS amd64 и arm64. OpenSSH (`ssh`) должен быть доступен в `PATH`. По умолчанию CLI требует уже проверенный ключ сервера в системном `known_hosts` и использует fail-closed host-key checking; для отдельного файла используйте `--known-hosts`. Пароль SSH никогда не принимается флагом и вводится только самим OpenSSH в интерактивном режиме; предпочтителен ключ:
+Поддерживаемые артефакты: Windows amd64, Linux amd64, macOS amd64 и arm64. OpenSSH (`ssh`) должен быть доступен в `PATH`. По умолчанию CLI требует уже проверенный ключ сервера в системном `known_hosts` и использует fail-closed host-key checking; для отдельного файла используйте `--known-hosts`. Пароль SSH никогда не принимается флагом: awg-vds запрашивает его один раз без отображения символов, держит только в памяти и передаёт OpenSSH через временный askpass-helper; предпочтителен ключ:
 
 ```text
 awg-vds install --host vpn.example.com --user root --identity-file ~/.ssh/id_ed25519 --engine legacy
@@ -38,7 +38,7 @@ awg-vds rotate-password --host HOST [connection flags]
 
 Установка в интерактивном режиме показывает пошаговый прогресс: preflight, зависимости, конфигурация, запуск контейнера, TLS/firewall, health-check и сохранение state. После завершения (или ошибки) интерфейс возвращает пользователя в главное меню, а не завершает приложение.
 
-Каждый этап дополнительно пишет timestamped log `start/completed/failed` с безопасной редацией. SSH использует временное multiplexed-соединение: пароль запрашивается один раз на запуск операции, а не для каждого remote command.
+Каждый этап дополнительно пишет timestamped log `start/completed/failed` с безопасной редацией. На Linux/macOS SSH использует временное multiplexed-соединение. На Windows Win32-OpenSSH не поддерживает `ControlPath`, поэтому используется временный askpass-helper; в обоих случаях пароль запрашивается один раз на запуск операции.
 
 При ошибке TUI сначала показывает отдельный экран с безопасно очищенной причиной и рекомендациями: проверка SSH, запуск `doctor`, занятые порты, Docker/health-check или запрет Legacy → Upstream. Возврат в меню выполняется только после `Enter`.
 
@@ -48,7 +48,7 @@ awg-vds rotate-password --host HOST [connection flags]
 awg-vds
 ```
 
-Меню не запрашивает и не сохраняет SSH-пароль: при выборе password authentication его запрашивает системный OpenSSH. Флаговый режим остаётся доступен для скриптов и CI.
+Меню не сохраняет SSH-пароль: при выборе password authentication его один раз запрашивает awg-vds без echo. Для CI используйте `--identity-file`; парольные неинтерактивные запуски намеренно отклоняются. Флаговый режим остаётся доступен для скриптов и CI.
 
 `status`, `update` и `backup` загружают настройки движка, портов, домена и путей из `/opt/awg-vds/install-state.json`. Для SSH всё равно нужны адрес сервера и параметры подключения. `update` сначала создаёт backup и только потом заменяет контейнер. Повторный `install` того же движка выполняет безопасное reconcile; смена движка автоматически запрещена.
 
