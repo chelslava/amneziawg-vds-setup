@@ -36,6 +36,10 @@ type engineInfo interface {
 }
 
 func engineCommand(e engineInfo, s state.State, first, upstream bool) string {
+	image := s.Image
+	if image == "" {
+		image = e.Image()
+	}
 	init := ""
 	if first {
 		init = "install -d -m 700 /opt/awg-vds/wireguard /opt/awg-vds; printf '%s\\n' net.ipv4.ip_forward=1 net.ipv4.conf.all.src_valid_mark=1 > /etc/sysctl.d/99-amneziawg-v2.conf; sysctl --system >/dev/null; "
@@ -44,6 +48,6 @@ func engineCommand(e engineInfo, s state.State, first, upstream bool) string {
 	if upstream {
 		extra = "--env EXPERIMENTAL_AWG=true --env OVERRIDE_AUTO_AWG=awg --env-file /opt/awg-vds/upstream.env -v /opt/awg-vds/wireguard:/etc/wireguard"
 	}
-	return init + fmt.Sprintf("docker pull %s; docker rm -f %s >/dev/null 2>&1 || true; docker run -d --name %s --network host --env WG_HOST=%s --env PORT=%d --env WG_PORT=%d --env WG_PERSISTENT_KEEPALIVE=25 --env WG_DEFAULT_DNS=1.1.1.1,1.0.0.1 %s --cap-add=NET_ADMIN --cap-add=SYS_MODULE --device /dev/net/tun:/dev/net/tun --restart unless-stopped %s", quoteEngine(e.Image()), quoteEngine(e.Container()), quoteEngine(e.Container()), quoteEngine(s.Domain), s.WebPort, s.VPNPort, extra, quoteEngine(e.Image()))
+	return init + fmt.Sprintf("docker pull %s; docker rm -f %s >/dev/null 2>&1 || true; docker run -d --name %s --network host --env PORT=%d --env WG_PORT=%d --env WG_PERSISTENT_KEEPALIVE=25 --env WG_DEFAULT_DNS=1.1.1.1,1.0.0.1 %s --cap-add=NET_ADMIN --cap-add=SYS_MODULE --device /dev/net/tun:/dev/net/tun --restart unless-stopped %s", quoteEngine(image), quoteEngine(e.Container()), quoteEngine(e.Container()), s.WebPort, s.VPNPort, extra, quoteEngine(image))
 }
 func quoteEngine(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }

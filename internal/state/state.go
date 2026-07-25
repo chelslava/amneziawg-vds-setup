@@ -13,18 +13,20 @@ import (
 const Path = "/opt/awg-vds/install-state.json"
 
 type State struct {
-	Version     int           `json:"schema_version"`
-	Engine      config.Engine `json:"engine"`
-	Image       string        `json:"image"`
-	Container   string        `json:"container"`
-	VPNPort     int           `json:"vpn_port"`
-	WebPort     int           `json:"web_port"`
-	Domain      string        `json:"domain,omitempty"`
-	TLSMode     string        `json:"tls_mode"`
-	ConfigPath  string        `json:"config_path"`
-	BackupPath  string        `json:"backup_path"`
-	InstalledAt time.Time     `json:"installed_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	Version          int           `json:"schema_version"`
+	Engine           config.Engine `json:"engine"`
+	Image            string        `json:"image"`
+	Container        string        `json:"container"`
+	VPNPort          int           `json:"vpn_port"`
+	WebPort          int           `json:"web_port"`
+	Domain           string        `json:"domain,omitempty"`
+	TLSMode          string        `json:"tls_mode"`
+	ConfigPath       string        `json:"config_path"`
+	BackupPath       string        `json:"backup_path"`
+	LastBackupPath   string        `json:"last_backup_path,omitempty"`
+	LastBackupSHA256 string        `json:"last_backup_sha256,omitempty"`
+	InstalledAt      time.Time     `json:"installed_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
 }
 
 func (s State) Validate() error {
@@ -42,6 +44,12 @@ func (s State) Validate() error {
 	}
 	if s.TLSMode != "disabled" && s.TLSMode != "caddy" {
 		return fmt.Errorf("invalid TLS mode %q", s.TLSMode)
+	}
+	if (s.TLSMode == "caddy") != (s.Domain != "") {
+		return fmt.Errorf("domain and TLS mode are inconsistent")
+	}
+	if (s.LastBackupPath == "") != (s.LastBackupSHA256 == "") {
+		return fmt.Errorf("backup metadata is incomplete")
 	}
 	return nil
 }

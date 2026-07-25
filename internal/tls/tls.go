@@ -7,8 +7,8 @@ import (
 
 const Image = "caddy:2.9.1-alpine"
 
-func Command(domain string, webPort int) string {
-	if domain == "" {
+func Command(enabled bool, domain string, webPort int) string {
+	if !enabled {
 		return "docker rm -f awg-vds-caddy >/dev/null 2>&1 || true"
 	}
 	var b strings.Builder

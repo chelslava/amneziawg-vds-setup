@@ -22,6 +22,10 @@ import (
 	tlsengine "github.com/chelslava/amneziawg-vds-setup/v2/internal/tls"
 )
 
+type remoteRunner interface {
+	Run(context.Context, string) (string, error)
+}
+
 func Run(args []string, out, errOut io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
 		usage(out)
@@ -106,7 +110,7 @@ func containsSecretFlag(args []string) bool {
 	return false
 }
 
-func doctor(ctx context.Context, c ssh.Client, o config.Options, out io.Writer) error {
+func doctor(ctx context.Context, c remoteRunner, o config.Options, out io.Writer) error {
 	result, err := c.Run(ctx, preflight.Command(o))
 	ssh.PrintOutput(out, result)
 	if err != nil {
@@ -118,7 +122,7 @@ func doctor(ctx context.Context, c ssh.Client, o config.Options, out io.Writer) 
 	return nil
 }
 
-func install(ctx context.Context, c ssh.Client, o config.Options, out io.Writer) error {
+func install(ctx context.Context, c remoteRunner, o config.Options, out io.Writer) error {
 	pre, err := c.Run(ctx, preflight.Command(o))
 	ssh.PrintOutput(out, pre)
 	if err != nil {
@@ -155,27 +159,27 @@ func install(ctx context.Context, c ssh.Client, o config.Options, out io.Writer)
 		ssh.PrintOutput(out, result)
 		return err
 	}
-	if result, err := c.Run(ctx, tlsengine.Command(o.Domain, o.WebPort)); err != nil {
+	if result, err := c.Run(ctx, tlsengine.Command(o.TLS, o.Domain, o.WebPort)); err != nil {
 		ssh.PrintOutput(out, result)
 		return err
 	}
-	if result, err := c.Run(ctx, firewall.Command(o.VPNPort, o.WebPort, o.Domain, o.RestrictIP)); err != nil {
+	if result, err := c.Run(ctx, firewall.Command(o.VPNPort, o.WebPort, o.TLS, o.RestrictIP)); err != nil {
 		ssh.PrintOutput(out, result)
-		return err
-	}
-	s.UpdatedAt = time.Now().UTC()
-	if err := writeState(ctx, c, s); err != nil {
 		return err
 	}
 	if result, err := c.Run(ctx, health.Command(s)); err != nil {
 		ssh.PrintOutput(out, result)
 		return fmt.Errorf("post-install health check failed: %w", err)
 	}
+	s.UpdatedAt = time.Now().UTC()
+	if err := writeState(ctx, c, s); err != nil {
+		return err
+	}
 	printSummary(out, s)
 	return nil
 }
 
-func existing(ctx context.Context, c ssh.Client, o config.Options, out io.Writer, action string) error {
+func existing(ctx context.Context, c remoteRunner, o config.Options, out io.Writer, action string) error {
 	s, found, err := readState(ctx, c)
 	if err != nil {
 		return err
@@ -198,7 +202,15 @@ func existing(ctx context.Context, c ssh.Client, o config.Options, out io.Writer
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(out, "Backup created in", s.BackupPath)
+		path, checksum, err := backup.ParseResult(result)
+		if err != nil {
+			return err
+		}
+		s.LastBackupPath, s.LastBackupSHA256 = path, checksum
+		if err := writeState(ctx, c, s); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "Backup created in", path)
 		return nil
 	case "update":
 		result, err := c.Run(ctx, backup.Command(s))
@@ -207,28 +219,36 @@ func existing(ctx context.Context, c ssh.Client, o config.Options, out io.Writer
 			return err
 		}
 		ssh.PrintOutput(out, result)
+		backupPath, backupSHA, err := backup.ParseResult(result)
+		if err != nil {
+			return err
+		}
 		e, _ := engine.Select(s.Engine)
-		result, err = c.Run(ctx, e.UpdateCommand(s))
+		candidate := s
+		candidate.Image = e.Image()
+		candidate.LastBackupPath, candidate.LastBackupSHA256 = backupPath, backupSHA
+		result, err = c.Run(ctx, e.UpdateCommand(candidate))
 		if err != nil {
 			ssh.PrintOutput(out, result)
-			return err
+			return fmt.Errorf("update failed: %w; rollback: %v", err, rollback(ctx, c, s, backupPath, out))
 		}
 		ssh.PrintOutput(out, result)
-		result, err = c.Run(ctx, tlsengine.Command(s.Domain, s.WebPort))
+		result, err = c.Run(ctx, tlsengine.Command(s.TLSMode == "caddy", s.Domain, s.WebPort))
 		if err != nil {
 			ssh.PrintOutput(out, result)
-			return err
+			return fmt.Errorf("TLS reconciliation failed: %w; rollback: %v", err, rollback(ctx, c, s, backupPath, out))
 		}
-		s.UpdatedAt = time.Now().UTC()
-		if err := writeState(ctx, c, s); err != nil {
-			return err
-		}
-		result, err = c.Run(ctx, health.Command(s))
+		candidate.UpdatedAt = time.Now().UTC()
+		result, err = c.Run(ctx, health.Command(candidate))
 		if err != nil {
 			ssh.PrintOutput(out, result)
-			return err
+			return fmt.Errorf("post-update health check failed: %w; rollback: %v", err, rollback(ctx, c, s, backupPath, out))
 		}
 		ssh.PrintOutput(out, result)
+		if err := writeState(ctx, c, candidate); err != nil {
+			return err
+		}
+		s = candidate
 		fmt.Fprintln(out, "Update completed; the existing configuration was preserved.")
 		printSummary(out, s)
 		return nil
@@ -236,22 +256,52 @@ func existing(ctx context.Context, c ssh.Client, o config.Options, out io.Writer
 	return fmt.Errorf("unknown action %s", action)
 }
 
-func reconcile(ctx context.Context, c ssh.Client, s state.State, out io.Writer) error {
+func reconcile(ctx context.Context, c remoteRunner, s state.State, out io.Writer) error {
 	e, _ := engine.Select(s.Engine)
-	result, err := c.Run(ctx, e.UpdateCommand(s))
+	candidate := s
+	candidate.Image = e.Image()
+	result, err := c.Run(ctx, e.UpdateCommand(candidate))
 	if err != nil {
 		ssh.PrintOutput(out, result)
 		return err
 	}
 	ssh.PrintOutput(out, result)
-	result, err = c.Run(ctx, health.Command(s))
+	result, err = c.Run(ctx, health.Command(candidate))
 	if err != nil {
 		ssh.PrintOutput(out, result)
 		return err
 	}
 	ssh.PrintOutput(out, result)
-	printSummary(out, s)
+	if err := writeState(ctx, c, candidate); err != nil {
+		return err
+	}
+	printSummary(out, candidate)
 	return nil
+}
+
+func rollback(ctx context.Context, c remoteRunner, s state.State, archive string, out io.Writer) error {
+	result, err := c.Run(ctx, backup.RestoreCommand(archive))
+	ssh.PrintOutput(out, result)
+	if err != nil {
+		return err
+	}
+	e, err := engine.Select(s.Engine)
+	if err != nil {
+		return err
+	}
+	result, err = c.Run(ctx, e.UpdateCommand(s))
+	ssh.PrintOutput(out, result)
+	if err != nil {
+		return err
+	}
+	result, err = c.Run(ctx, tlsengine.Command(s.TLSMode == "caddy", s.Domain, s.WebPort))
+	ssh.PrintOutput(out, result)
+	if err != nil {
+		return err
+	}
+	result, err = c.Run(ctx, health.Command(s))
+	ssh.PrintOutput(out, result)
+	return err
 }
 
 func newState(o config.Options) state.State {
@@ -289,7 +339,7 @@ func hostForPanel(o config.Options) string {
 	return o.Host
 }
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
-func writeState(ctx context.Context, c ssh.Client, s state.State) error {
+func writeState(ctx context.Context, c remoteRunner, s state.State) error {
 	b, err := state.Encode(s)
 	if err != nil {
 		return err
@@ -298,7 +348,7 @@ func writeState(ctx context.Context, c ssh.Client, s state.State) error {
 	_, err = c.Run(ctx, fmt.Sprintf("set -eu; install -d -m 700 /opt/awg-vds; printf '%s' | base64 -d > /opt/awg-vds/install-state.json.tmp; chmod 644 /opt/awg-vds/install-state.json.tmp; mv /opt/awg-vds/install-state.json.tmp %s", encoded, shellQuote(state.Path)))
 	return err
 }
-func readState(ctx context.Context, c ssh.Client) (state.State, bool, error) {
+func readState(ctx context.Context, c remoteRunner) (state.State, bool, error) {
 	result, err := c.Run(ctx, "if test -f /opt/awg-vds/install-state.json; then base64 -w0 /opt/awg-vds/install-state.json; fi")
 	if err != nil {
 		return state.State{}, false, err

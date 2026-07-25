@@ -71,6 +71,9 @@ func (o Options) ValidateInstall() error {
 	if o.TLS && o.Domain == "" {
 		return fmt.Errorf("--tls requires --domain")
 	}
+	if o.Domain != "" && !o.TLS {
+		return fmt.Errorf("--domain requires --tls; use --tls or omit --domain")
+	}
 	if o.RestrictIP != "" && net.ParseIP(o.RestrictIP) == nil {
 		return fmt.Errorf("--restrict-panel-ip must be an IP address")
 	}

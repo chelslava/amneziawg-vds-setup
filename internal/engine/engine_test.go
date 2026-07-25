@@ -33,3 +33,24 @@ func TestPinnedImagesAndHostNetwork(t *testing.T) {
 		}
 	}
 }
+
+func TestHostOnlyUsesEnvFileAsWGHostSource(t *testing.T) {
+	e, _ := Select(config.Legacy)
+	s := state.State{Engine: config.Legacy, Image: e.Image(), Container: e.Container(), VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", Version: 1}
+	cmd := e.UpdateCommand(s)
+	if strings.Contains(cmd, "WG_HOST=") {
+		t.Fatalf("engine command must not override WG_HOST: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--env-file /opt/awg-vds/legacy.env") {
+		t.Fatalf("engine command must use the generated env file: %s", cmd)
+	}
+}
+
+func TestUpdateUsesCandidateImageAsRuntimeTarget(t *testing.T) {
+	e, _ := Select(config.Legacy)
+	s := state.State{Engine: config.Legacy, Image: "ghcr.io/example/previous:1", Container: e.Container(), Domain: "vpn.example.com", VPNPort: 1234, WebPort: 51821, TLSMode: "caddy", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", Version: 1}
+	cmd := e.UpdateCommand(s)
+	if !strings.Contains(cmd, "ghcr.io/example/previous:1") || strings.Contains(cmd, e.Image()) {
+		t.Fatalf("update command ignored candidate state image: %s", cmd)
+	}
+}
