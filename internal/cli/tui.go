@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -121,6 +122,69 @@ func writeChoice(b *strings.Builder, selected bool, label string) {
 type noticeModel struct {
 	title string
 	body  string
+}
+
+var errTUIBack = errors.New("interactive form cancelled")
+
+type dropdownModel struct {
+	title     string
+	choices   []string
+	selected  int
+	cancelled bool
+}
+
+func (m dropdownModel) Init() tea.Cmd { return nil }
+
+func (m dropdownModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	switch key.String() {
+	case "up", "k":
+		if m.selected > 0 {
+			m.selected--
+		}
+	case "down", "j":
+		if m.selected < len(m.choices)-1 {
+			m.selected++
+		}
+	case "enter", "space":
+		return m, tea.Quit
+	case "esc", "q":
+		m.cancelled = true
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m dropdownModel) View() tea.View {
+	var b strings.Builder
+	b.WriteString("╭────────────────────────────────────────────╮\n")
+	b.WriteString("│ awg-vds · select a value                   │\n")
+	b.WriteString("╰────────────────────────────────────────────╯\n\n")
+	b.WriteString(m.title)
+	b.WriteString("\n\n")
+	for i, choice := range m.choices {
+		writeChoice(&b, i == m.selected, choice)
+	}
+	b.WriteString("\n↑/↓ or j/k · Enter select · Esc/back return")
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	v.WindowTitle = "awg-vds · select"
+	return v
+}
+
+func dropdown(in io.Reader, out io.Writer, title string, choices []string, selected int) (string, error) {
+	final, err := tea.NewProgram(dropdownModel{title: title, choices: choices, selected: selected}, tea.WithInput(in), tea.WithOutput(out)).Run()
+	if err != nil {
+		return "", err
+	}
+	model := final.(dropdownModel)
+	if model.cancelled {
+		return "", errTUIBack
+	}
+	return model.choices[model.selected], nil
 }
 
 func (m noticeModel) Init() tea.Cmd { return nil }
@@ -306,8 +370,11 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			usage(out)
 			continue
 		}
-		command, err := interactiveCommandLanguage(reader, out, selection.action, selection.language)
+		command, err := interactiveCommandTUI(reader, out, selection.action, selection.language)
 		if err != nil {
+			if errors.Is(err, errTUIBack) {
+				continue
+			}
 			title, body := errorNotice(selection.language, selection.action, err)
 			if noticeErr := showNoticeTUI(reader, out, title, body); noticeErr != nil {
 				return noticeErr

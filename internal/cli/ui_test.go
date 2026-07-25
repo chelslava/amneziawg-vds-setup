@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -123,5 +124,28 @@ func TestErrorNoticeExplainsLegacyToUpstream(t *testing.T) {
 	title, body := errorNotice(langRU, "install", fmt.Errorf("refusing automatic migration from legacy to upstream"))
 	if title != "Операция не выполнена" || !strings.Contains(body, "чистый VDS") || !strings.Contains(body, "не изменена") {
 		t.Fatalf("migration notice lacks actionable guidance: %s / %s", title, body)
+	}
+}
+
+func TestDropdownRendersChoicesAndBackHint(t *testing.T) {
+	view := (dropdownModel{title: "Engine", choices: []string{"legacy", "upstream"}}).View().Content
+	if !strings.Contains(view, "legacy") || !strings.Contains(view, "upstream") || !strings.Contains(view, "Esc/back return") {
+		t.Fatalf("dropdown view is incomplete: %s", view)
+	}
+}
+
+func TestDropdownEscapeReturnsToParent(t *testing.T) {
+	model := dropdownModel{choices: []string{"legacy", "upstream"}}
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = updated.(dropdownModel)
+	if command == nil || !model.cancelled {
+		t.Fatalf("dropdown did not signal back navigation: model=%+v command=%v", model, command)
+	}
+}
+
+func TestPromptBackReturnsNavigationSignal(t *testing.T) {
+	_, err := prompt(bufio.NewReader(strings.NewReader("back\n")), &strings.Builder{}, "Host", "")
+	if !errors.Is(err, errTUIBack) {
+		t.Fatalf("back command did not return navigation signal: %v", err)
 	}
 }
