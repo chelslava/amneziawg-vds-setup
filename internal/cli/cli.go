@@ -421,7 +421,7 @@ func panelURL(s state.State) string {
 		host = s.PanelHost
 	}
 	if host == "" {
-		host = "<VDS-address>"
+		return fmt.Sprintf("http://<VDS-address>:%d", s.WebPort)
 	}
 	if s.TLSMode == "caddy" {
 		return "https://" + host

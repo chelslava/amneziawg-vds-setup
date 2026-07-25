@@ -18,6 +18,16 @@ type scriptedRunner struct {
 	commands     []string
 }
 
+type matcherRunner struct {
+	commands []string
+	match    func(string) (string, error)
+}
+
+func (r *matcherRunner) Run(_ context.Context, command string) (string, error) {
+	r.commands = append(r.commands, command)
+	return r.match(command)
+}
+
 func (r *scriptedRunner) Run(_ context.Context, command string) (string, error) {
 	r.commands = append(r.commands, command)
 	switch {
@@ -71,7 +81,7 @@ func TestInstallPromotesStateOnlyAfterHealth(t *testing.T) {
 }
 
 func TestUpdateRestoresSnapshotAfterHealthFailure(t *testing.T) {
-	s := state.State{Version: 1, Engine: config.Legacy, Image: "ghcr.io/yokitoki/awg-easy:1.0.1", Container: "awg-vds-legacy", VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
+	s := state.State{Version: 1, Engine: config.Legacy, Image: "ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f", Container: "awg-vds-legacy", VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
 	runner := &scriptedRunner{statePayload: encodedStatePayload(t, s)}
 	err := existing(context.Background(), runner, config.Options{}, &strings.Builder{}, "update")
 	if err == nil || !strings.Contains(err.Error(), "post-update health") {
@@ -96,5 +106,70 @@ func TestUpdateRestoresSnapshotAfterHealthFailure(t *testing.T) {
 		if strings.Contains(command, "install-state.json.tmp") {
 			t.Fatal("failed update promoted new state")
 		}
+	}
+}
+
+func TestInstallRejectsBusyPortBeforeMutatingEmptyHost(t *testing.T) {
+	runner := &matcherRunner{match: func(command string) (string, error) {
+		if strings.Contains(command, "if test -f /opt/awg-vds/install-state.json") {
+			return "", nil
+		}
+		return "PORT_TCP_51821=busy\nPREFLIGHT=ok\n", nil
+	}}
+	err := install(context.Background(), runner, config.Options{Engine: config.Legacy, Host: "192.0.2.1", User: "root", SSHPort: 22, VPNPort: 1234, WebPort: 51821}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "already occupied") {
+		t.Fatalf("expected busy-port refusal, got %v", err)
+	}
+	if len(runner.commands) != 2 {
+		t.Fatalf("install mutated host after busy preflight: %#v", runner.commands)
+	}
+}
+
+func TestUpstreamInstallRejectsUnsupportedModule(t *testing.T) {
+	runner := &matcherRunner{match: func(command string) (string, error) {
+		if strings.Contains(command, "if test -f /opt/awg-vds/install-state.json") {
+			return "", nil
+		}
+		return "AMNEZIAWG=unsupported\nPREFLIGHT=ok\n", nil
+	}}
+	err := install(context.Background(), runner, config.Options{Engine: config.Upstream, Host: "192.0.2.1", User: "root", SSHPort: 22, VPNPort: 1234, WebPort: 51821}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "requires the AmneziaWG kernel module") {
+		t.Fatalf("expected upstream module refusal, got %v", err)
+	}
+}
+
+func TestExistingCommandRequiresState(t *testing.T) {
+	runner := &matcherRunner{match: func(command string) (string, error) {
+		if strings.Contains(command, "if test -f /opt/awg-vds/install-state.json") {
+			return "", nil
+		}
+		return "ok", nil
+	}}
+	err := existing(context.Background(), runner, config.Options{}, &strings.Builder{}, "status")
+	if err == nil || !strings.Contains(err.Error(), "no v2 installation state") {
+		t.Fatalf("expected missing-state error, got %v", err)
+	}
+}
+
+func TestSameEngineInstallReconcilesExpectedBusyPort(t *testing.T) {
+	s := state.State{Version: 1, Engine: config.Legacy, Image: config.LegacyImage, Container: "awg-vds-legacy", VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
+	runner := &matcherRunner{match: func(command string) (string, error) {
+		switch {
+		case strings.Contains(command, "if test -f /opt/awg-vds/install-state.json"):
+			return encodedStatePayload(t, s), nil
+		case strings.Contains(command, "PORT_TCP_51821"):
+			return "PORT_TCP_51821=busy\nPREFLIGHT=ok\n", nil
+		case strings.Contains(command, "HEALTH=ok"):
+			return "HEALTH=ok\n", nil
+		default:
+			return "ok\n", nil
+		}
+	}}
+	var out strings.Builder
+	if err := install(context.Background(), runner, config.Options{Engine: config.Legacy, Host: "192.0.2.1", User: "root", SSHPort: 22, VPNPort: 1234, WebPort: 51821}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "reconciling") || !strings.Contains(out.String(), "plain HTTP") {
+		t.Fatalf("reconcile summary is incomplete: %s", out.String())
 	}
 }
