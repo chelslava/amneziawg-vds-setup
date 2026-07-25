@@ -8,6 +8,9 @@
 - Интерактивная установка upstream на Ubuntu теперь после такой ошибки спрашивает
   разрешение добавить официальный AmneziaWG PPA и повторяет preflight; без явного
   подтверждения APT-источники не меняются.
+- Исправлена установка kernel module после PPA: перед `amneziawg` добавлены
+  текущие kernel headers, DKMS, build tools и Launchpad prerequisites; ошибка
+  `modprobe` получает отдельные рекомендации вместо SSH-подсказки.
 
 - Исправлен Windows-сбой `getsockname failed: Not a socket`: `ControlPath` теперь
   используется только на Unix, а пароль вводится один раз без echo через

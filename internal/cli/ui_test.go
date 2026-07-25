@@ -72,6 +72,15 @@ func TestErrorNoticeExplainsMissingUpstreamModule(t *testing.T) {
 	}
 }
 
+func TestErrorNoticeExplainsModuleLoadFailure(t *testing.T) {
+	_, notice := errorNotice(langRU, "install", errors.New("AMNEZIAWG=module-load-failed modprobe: FATAL: Module amneziawg not found"))
+	for _, want := range []string{"не загрузился", "linux-headers", "dkms", "engine legacy"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("missing module-load recommendation %q in %s", want, notice)
+		}
+	}
+}
+
 func TestTUILanguageSelectionPrecedesActionMenu(t *testing.T) {
 	model := tuiModel{}
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})

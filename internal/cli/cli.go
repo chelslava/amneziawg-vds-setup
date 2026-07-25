@@ -489,7 +489,12 @@ func configurationDrift(s state.State, o config.Options) []string {
 func dependenciesCommand(upstream bool) string {
 	aptUpdate := "apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update"
 	aptInstall := "apt-get -o APT::Get::AllowUnauthenticated=false install -y"
-	cmd := fmt.Sprintf("set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; %s; command -v docker >/dev/null 2>&1 || %s ca-certificates apache2-utils openssl curl docker.io; if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then compose_pkg=; for package in docker-compose-plugin docker-compose-v2 docker-compose; do if apt-cache show \"$package\" >/dev/null 2>&1; then compose_pkg=\"$package\"; break; fi; done; test -n \"$compose_pkg\"; %s \"$compose_pkg\"; fi; command -v htpasswd >/dev/null 2>&1 || %s apache2-utils; command -v openssl >/dev/null 2>&1 || %s openssl; command -v curl >/dev/null 2>&1 || %s curl; systemctl enable --now docker; ", aptUpdate, aptInstall, aptInstall, aptInstall, aptInstall, aptInstall)
+	cmd := fmt.Sprintf("set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; %s; command -v docker >/dev/null 2>&1 || %s ca-certificates apache2-utils openssl curl docker.io; if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then compose_pkg=; for package in docker-compose-plugin docker-compose-v2 docker-compose; do if apt-cache show \"$package\" >/dev/null 2>&1; then compose_pkg=\"$package\"; break; fi; done; test -n \"$compose_pkg\"; %s \"$compose_pkg\"; fi; command -v htpasswd >/dev/null 2>&1 || %s apache2-utils; command -v openssl >/dev/null 2>&1 || %s openssl; command -v curl >/dev/null 2>&1 || %s curl; %s systemctl enable --now docker; ", aptUpdate, aptInstall, aptInstall, aptInstall, aptInstall, aptInstall, func() string {
+		if upstream {
+			return aptInstall + " linux-headers-$(uname -r) dkms build-essential;"
+		}
+		return ""
+	}())
 	if upstream {
 		cmd += fmt.Sprintf("if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then %s; if ! %s amneziawg; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi; if module_error=$(modprobe amneziawg 2>&1); then printf 'AMNEZIAWG=module-loaded\\n'; else printf 'AMNEZIAWG=module-load-failed %%s\\n' \"$module_error\" >&2; exit 1; fi; fi; ", aptUpdate, aptInstall)
 	}
@@ -497,7 +502,7 @@ func dependenciesCommand(upstream bool) string {
 }
 
 func thirdPartyAmneziaRepositoryCommand() string {
-	return "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; apt-get -o APT::Get::AllowUnauthenticated=false install -y software-properties-common; add-apt-repository -y ppa:amnezia/ppa; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; printf 'AMNEZIAWG_REPOSITORY=official-launchpad-ppa\\n'"
+	return "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; apt-get -o APT::Get::AllowUnauthenticated=false install -y software-properties-common python3-launchpadlib gnupg2 linux-headers-$(uname -r) dkms build-essential; add-apt-repository -y ppa:amnezia/ppa; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; printf 'AMNEZIAWG_REPOSITORY=official-launchpad-ppa\\n'"
 }
 
 func rotatePasswordCommand(s state.State) string {

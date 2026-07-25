@@ -239,6 +239,12 @@ func errorNotice(lang uiLanguage, action string, err error) (string, string) {
 		} else {
 			recommendation = []string{"Upstream requires the AmneziaWG kernel module; this OS/kernel does not support it or the repositories are unavailable.", "Run doctor and check the kernel version, architecture, and availability of the amneziawg package/module.", "If the provider cannot load the module, choose engine legacy for WireSock compatibility.", "Legacy and Upstream are separate scenarios; automatic migration between them is not supported."}
 		}
+	} else if strings.Contains(strings.ToLower(detail), "module-load-failed") || strings.Contains(strings.ToLower(detail), "modprobe: fatal") {
+		if lang == langRU {
+			recommendation = []string{"Репозиторий найден, но модуль AmneziaWG не загрузился для текущего ядра.", "Проверьте linux-headers, dkms и результат: dkms status; dmesg | tail -50.", "Повторная установка обновлённой версии добавит headers/DKMS и попробует собрать модуль заново.", "Если headers или загрузка модулей запрещены провайдером, используйте engine legacy или другой VDS."}
+		} else {
+			recommendation = []string{"The repository was found, but the AmneziaWG module did not load for the running kernel.", "Check linux-headers, dkms, and run: dkms status; dmesg | tail -50.", "Retrying with the updated installer will add headers/DKMS and rebuild the module.", "If headers or module loading are blocked by the provider, use engine legacy or another VDS."}
+		}
 	} else if strings.Contains(strings.ToLower(detail), "ssh command failed") {
 		if lang == langRU {
 			recommendation = []string{"Проверьте адрес VDS, пользователя и порт SSH.", "При password выберите интерактивный ввод OpenSSH; пароль не передаётся в аргументах.", "Для ключа проверьте путь и known_hosts.", "Запустите doctor после исправления доступа."}
