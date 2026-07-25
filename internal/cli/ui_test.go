@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -115,5 +116,12 @@ func TestInstallProgressRendersStageAndCompletionBar(t *testing.T) {
 	installStep(&out, 9, 9, "Saving installation state")
 	if !strings.Contains(out.String(), "[████████████████████] 9/9") || !strings.Contains(out.String(), "Saving installation state") {
 		t.Fatalf("progress output is incomplete: %q", out.String())
+	}
+}
+
+func TestErrorNoticeExplainsLegacyToUpstream(t *testing.T) {
+	title, body := errorNotice(langRU, "install", fmt.Errorf("refusing automatic migration from legacy to upstream"))
+	if title != "Операция не выполнена" || !strings.Contains(body, "чистый VDS") || !strings.Contains(body, "не изменена") {
+		t.Fatalf("migration notice lacks actionable guidance: %s / %s", title, body)
 	}
 }

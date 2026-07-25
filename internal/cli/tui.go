@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/chelslava/amneziawg-vds-setup/v2/internal/ssh"
 )
 
 type uiLanguage string
@@ -115,6 +116,78 @@ func writeChoice(b *strings.Builder, selected bool, label string) {
 		marker = "› "
 	}
 	fmt.Fprintf(b, "%s%s\n", marker, label)
+}
+
+type noticeModel struct {
+	title string
+	body  string
+}
+
+func (m noticeModel) Init() tea.Cmd { return nil }
+
+func (m noticeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	if key.String() == "enter" || key.String() == "space" || key.String() == "q" || key.String() == "esc" {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m noticeModel) View() tea.View {
+	var b strings.Builder
+	b.WriteString("╭────────────────────────────────────────────╮\n")
+	b.WriteString("│ awg-vds · action needs attention            │\n")
+	b.WriteString("╰────────────────────────────────────────────╯\n\n")
+	b.WriteString("! ")
+	b.WriteString(m.title)
+	b.WriteString("\n\n")
+	b.WriteString(m.body)
+	b.WriteString("\n\nPress Enter to return to the main menu · q/Esc to dismiss")
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	v.WindowTitle = "awg-vds · attention"
+	return v
+}
+
+func showNoticeTUI(in io.Reader, out io.Writer, title, body string) error {
+	_, err := tea.NewProgram(noticeModel{title: title, body: body}, tea.WithInput(in), tea.WithOutput(out)).Run()
+	return err
+}
+
+func errorNotice(lang uiLanguage, action string, err error) (string, string) {
+	title := "Operation failed"
+	if lang == langRU {
+		title = "Операция не выполнена"
+	}
+	detail := ssh.Redact(err.Error())
+	recommendation := []string{}
+	if strings.Contains(strings.ToLower(detail), "migration") || strings.Contains(strings.ToLower(detail), "legacy") && strings.Contains(strings.ToLower(detail), "upstream") {
+		if lang == langRU {
+			recommendation = []string{"На сервере уже установлен Legacy.", "Upstream — отдельный сценарий и не заменяет Legacy автоматически.", "Используйте чистый VDS для Upstream или повторите установку с engine legacy.", "Текущая конфигурация не изменена."}
+		} else {
+			recommendation = []string{"A Legacy installation already exists on this server.", "Upstream is a separate scenario and never replaces Legacy automatically.", "Use a fresh VDS for Upstream or retry with engine legacy.", "The existing configuration was not changed."}
+		}
+	} else if strings.Contains(strings.ToLower(detail), "ssh command failed") {
+		if lang == langRU {
+			recommendation = []string{"Проверьте адрес VDS, пользователя и порт SSH.", "При password выберите интерактивный ввод OpenSSH; пароль не передаётся в аргументах.", "Для ключа проверьте путь и known_hosts.", "Запустите doctor после исправления доступа."}
+		} else {
+			recommendation = []string{"Check the VDS address, SSH user, and SSH port.", "For password auth, use the interactive OpenSSH prompt; the password is never an argument.", "For key auth, check the identity path and known_hosts.", "Run doctor after fixing access."}
+		}
+	} else if strings.Contains(strings.ToLower(detail), "health") || action == "install" || action == "update" {
+		if lang == langRU {
+			recommendation = []string{"Запустите doctor и проверьте Docker, порты и firewall.", "Убедитесь, что UDP VPN-порт и TCP-порт панели свободны.", "Повторный install безопасно выполнит reconcile после устранения причины."}
+		} else {
+			recommendation = []string{"Run doctor and check Docker, ports, and the firewall.", "Make sure the VPN UDP port and panel TCP port are available.", "A later install safely reconciles the deployment after the cause is fixed."}
+		}
+	} else if lang == langRU {
+		recommendation = []string{"Проверьте текст ошибки выше.", "Запустите doctor для диагностики сервера.", "После устранения причины повторите операцию."}
+	} else {
+		recommendation = []string{"Review the error above.", "Run doctor to diagnose the server.", "Retry the operation after fixing the cause."}
+	}
+	return title, "Error:\n" + detail + "\n\n" + strings.Join(recommendation, "\n")
 }
 
 func actionFromIndex(index int) string {
@@ -235,7 +308,10 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 		}
 		command, err := interactiveCommandLanguage(reader, out, selection.action, selection.language)
 		if err != nil {
-			fmt.Fprintln(out, tr(selection.language, "operation_failed"), err)
+			title, body := errorNotice(selection.language, selection.action, err)
+			if noticeErr := showNoticeTUI(reader, out, title, body); noticeErr != nil {
+				return noticeErr
+			}
 			continue
 		}
 		if (command[0] == "install" || command[0] == "update" || command[0] == "rotate-password") && !confirm(reader, out, tr(selection.language, "proceed")) {
@@ -243,7 +319,10 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			continue
 		}
 		if err := runCommand(command, out, errOut); err != nil {
-			fmt.Fprintln(out, tr(selection.language, "operation_failed"), err)
+			title, body := errorNotice(selection.language, selection.action, err)
+			if noticeErr := showNoticeTUI(reader, out, title, body); noticeErr != nil {
+				return noticeErr
+			}
 		} else {
 			fmt.Fprintln(out, tr(selection.language, "operation_completed"))
 			fmt.Fprintln(out, tr(selection.language, "return_menu"))
