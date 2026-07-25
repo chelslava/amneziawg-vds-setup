@@ -1,12 +1,12 @@
 # awg-vds v2
 
-Кроссплатформенный консольный установщик личного AmneziaWG VPN на VDS. Основной язык — Go; один бинарник работает на Windows, Linux и macOS и использует установленный системный OpenSSH.
+Кроссплатформенный консольный установщик личного AmneziaWG VPN на VDS. Основной язык — Go; один бинарник работает на Windows, Linux и macOS и использует установленный системный OpenSSH. Интерактивный интерфейс построен на Bubble Tea v2; флаговый режим сохраняется для automation.
 
 ## Установка бинарника
 
 Скачайте архив для своей платформы из [GitHub Release v2.0.0](https://github.com/chelslava/amneziawg-vds-setup/releases/tag/v2.0.0), проверьте `SHA256SUMS` и добавьте `awg-vds` в `PATH`.
 
-Для сборки из исходников:
+Для сборки из исходников нужен Go 1.25+:
 
 ```powershell
 go test ./...
@@ -34,7 +34,7 @@ awg-vds rotate-password --host HOST [connection flags]
 
 ### Интерактивное меню
 
-Запуск без аргументов открывает line-oriented control center с меню Install, Status, Doctor, Update, Backup и Rotate password. Формы предлагают безопасные значения по умолчанию, позволяют выбрать `legacy`/`upstream`, домен, TLS и IP restriction, а destructive-действия требуют явного ввода `yes`.
+Запуск без аргументов открывает line-oriented control center с меню Install, Status, Doctor, Update, Backup и Rotate password. В форме подключения есть отдельный выбор SSH auth method: `key` или `password`; при `password` пароль вводится следующим prompt’ом самого OpenSSH и не читается приложением. Формы предлагают безопасные значения по умолчанию, позволяют выбрать `legacy`/`upstream`, домен, TLS и IP restriction, а destructive-действия требуют явного ввода `yes`.
 
 ```text
 awg-vds

@@ -9,99 +9,55 @@ import (
 	"strings"
 )
 
-// interactiveMenu is deliberately line-oriented: it works in Windows Terminal,
-// classic PowerShell, macOS Terminal, Linux SSH sessions, and redirected stdin.
-// The flag interface remains available for automation and CI.
-func interactiveMenu(in *bufio.Reader, out, errOut io.Writer) error {
-	for {
-		fmt.Fprintln(out, "")
-		fmt.Fprintln(out, "╭────────────────────────────────────────────╮")
-		fmt.Fprintln(out, "│ awg-vds 2 · AmneziaWG VDS control center   │")
-		fmt.Fprintln(out, "╰────────────────────────────────────────────╯")
-		fmt.Fprintln(out, "  1  Install / reconcile")
-		fmt.Fprintln(out, "  2  Status")
-		fmt.Fprintln(out, "  3  Doctor")
-		fmt.Fprintln(out, "  4  Update (backup + rollback)")
-		fmt.Fprintln(out, "  5  Backup")
-		fmt.Fprintln(out, "  6  Rotate panel password")
-		fmt.Fprintln(out, "  7  CLI help")
-		fmt.Fprintln(out, "  0  Exit")
-		choice, err := prompt(in, out, "Select an action", "0")
-		if err != nil {
-			return err
-		}
-		if choice == "0" {
-			fmt.Fprintln(out, "Goodbye.")
-			return nil
-		}
-		if choice == "7" {
-			usage(out)
-			continue
-		}
-		command, err := interactiveCommand(in, out, choice)
-		if err != nil {
-			fmt.Fprintln(out, "Input error:", err)
-			continue
-		}
-		if command == nil {
-			fmt.Fprintln(out, "Choose a number from 0 to 7.")
-			continue
-		}
-		if (command[0] == "install" || command[0] == "update" || command[0] == "rotate-password") && !confirm(in, out, "Proceed") {
-			fmt.Fprintln(out, "Cancelled.")
-			continue
-		}
-		fmt.Fprintln(out, "")
-		if err := runCommand(command, out, errOut); err != nil {
-			fmt.Fprintln(out, "Operation failed:", err)
-		} else {
-			fmt.Fprintln(out, "Operation completed.")
-		}
-		if !confirm(in, out, "Return to menu") {
-			return nil
-		}
-	}
+func interactiveCommand(in *bufio.Reader, out io.Writer, choice string) ([]string, error) {
+	return interactiveCommandLanguage(in, out, choice, langEN)
 }
 
-func interactiveCommand(in *bufio.Reader, out io.Writer, choice string) ([]string, error) {
-	command := map[string]string{"1": "install", "2": "status", "3": "doctor", "4": "update", "5": "backup", "6": "rotate-password"}[choice]
+func interactiveCommandLanguage(in *bufio.Reader, out io.Writer, choice string, lang uiLanguage) ([]string, error) {
+	command := choice
+	if mapped, ok := map[string]string{"1": "install", "2": "status", "3": "doctor", "4": "update", "5": "backup", "6": "rotate-password"}[choice]; ok {
+		command = mapped
+	}
+	if command != "install" && command != "status" && command != "doctor" && command != "update" && command != "backup" && command != "rotate-password" {
+		command = ""
+	}
 	if command == "" {
 		return nil, nil
 	}
 	args := []string{command}
-	connection, err := interactiveConnection(in, out)
+	connection, err := interactiveConnectionLanguage(in, out, lang)
 	if err != nil {
 		return nil, err
 	}
 	args = append(args, connection...)
 	if command == "install" || command == "doctor" {
-		engine, err := promptChoice(in, out, "Engine", []string{"legacy", "upstream"}, "legacy")
+		engine, err := promptChoice(in, out, tr(lang, "engine"), []string{"legacy", "upstream"}, "legacy")
 		if err != nil {
 			return nil, err
 		}
 		args = append(args, "--engine", engine)
 	}
 	if command == "install" {
-		vpn, err := promptInt(in, out, "VPN UDP port", 1234)
+		vpn, err := promptInt(in, out, tr(lang, "vpn_port"), 1234)
 		if err != nil {
 			return nil, err
 		}
-		web, err := promptInt(in, out, "Panel TCP port", 51821)
+		web, err := promptInt(in, out, tr(lang, "panel_port"), 51821)
 		if err != nil {
 			return nil, err
 		}
 		args = append(args, "--vpn-port", strconv.Itoa(vpn), "--web-port", strconv.Itoa(web))
-		domain, err := prompt(in, out, "Domain (empty for host-only HTTP)", "")
+		domain, err := prompt(in, out, tr(lang, "domain"), "")
 		if err != nil {
 			return nil, err
 		}
 		if domain != "" {
 			args = append(args, "--domain", domain)
-			if confirm(in, out, "Enable TLS with Caddy") {
+			if confirm(in, out, tr(lang, "enable_tls")) {
 				args = append(args, "--tls")
 			}
 		}
-		restrict, err := prompt(in, out, "Optional panel IP restriction", "")
+		restrict, err := prompt(in, out, tr(lang, "panel_restriction"), "")
 		if err != nil {
 			return nil, err
 		}
@@ -113,32 +69,45 @@ func interactiveCommand(in *bufio.Reader, out io.Writer, choice string) ([]strin
 }
 
 func interactiveConnection(in *bufio.Reader, out io.Writer) ([]string, error) {
-	host, err := prompt(in, out, "VDS address", "")
+	return interactiveConnectionLanguage(in, out, langEN)
+}
+
+func interactiveConnectionLanguage(in *bufio.Reader, out io.Writer, lang uiLanguage) ([]string, error) {
+	host, err := prompt(in, out, tr(lang, "vds_address"), "")
 	if err != nil {
 		return nil, err
 	}
 	if host == "" {
-		return nil, errors.New("VDS address is required")
+		return nil, errors.New(tr(lang, "vds_required"))
 	}
-	user, err := prompt(in, out, "SSH user", "root")
+	user, err := prompt(in, out, tr(lang, "ssh_user"), "root")
 	if err != nil {
 		return nil, err
 	}
-	port, err := promptInt(in, out, "SSH port", 22)
+	port, err := promptInt(in, out, tr(lang, "ssh_port"), 22)
 	if err != nil {
 		return nil, err
 	}
-	identity, err := prompt(in, out, "SSH identity file (empty for interactive SSH auth)", "")
+	authMethod, err := promptChoice(in, out, tr(lang, "ssh_auth"), []string{"key", "password"}, "key")
 	if err != nil {
 		return nil, err
 	}
-	knownHosts, err := prompt(in, out, "known_hosts file (empty for system default)", "")
+	identity := ""
+	if authMethod == "key" {
+		identity, err = prompt(in, out, tr(lang, "identity_file"), "")
+		if err != nil {
+			return nil, err
+		}
+	}
+	knownHosts, err := prompt(in, out, tr(lang, "known_hosts"), "")
 	if err != nil {
 		return nil, err
 	}
 	args := []string{"--host", host, "--user", user, "--ssh-port", strconv.Itoa(port)}
 	if identity != "" {
 		args = append(args, "--identity-file", identity)
+	} else {
+		fmt.Fprintln(out, tr(lang, "password_notice"))
 	}
 	if knownHosts != "" {
 		args = append(args, "--known-hosts", knownHosts)
@@ -192,4 +161,17 @@ func promptChoice(in *bufio.Reader, out io.Writer, label string, choices []strin
 func confirm(in *bufio.Reader, out io.Writer, label string) bool {
 	value, err := prompt(in, out, label+"? type yes", "no")
 	return err == nil && strings.EqualFold(value, "yes")
+}
+
+func tr(lang uiLanguage, key string) string {
+	if lang == langRU {
+		if value, ok := map[string]string{
+			"select_action": "Выберите действие", "goodbye": "До свидания.", "invalid_menu": "Выберите число от 0 до 7.", "cancelled": "Отменено.", "operation_failed": "Операция завершилась ошибкой:", "operation_completed": "Операция завершена.", "return_menu": "Вернуться в меню", "proceed": "Продолжить", "engine": "Движок", "vpn_port": "UDP-порт VPN", "panel_port": "TCP-порт панели", "domain": "Домен (пусто = HTTP по адресу VDS)", "enable_tls": "Включить TLS через Caddy", "panel_restriction": "Ограничение панели по IP (необязательно)", "vds_address": "Адрес VDS", "vds_required": "адрес VDS обязателен", "ssh_user": "Пользователь SSH", "ssh_port": "Порт SSH", "ssh_auth": "Метод SSH-аутентификации", "identity_file": "Файл SSH-ключа", "known_hosts": "Файл known_hosts (пусто = системный)", "password_notice": "Пароль запросит OpenSSH; awg-vds его не читает и не сохраняет.",
+		}[key]; ok {
+			return value
+		}
+	}
+	return map[string]string{
+		"select_action": "Select an action", "goodbye": "Goodbye.", "invalid_menu": "Choose a number from 0 to 7.", "cancelled": "Cancelled.", "operation_failed": "Operation failed:", "operation_completed": "Operation completed.", "return_menu": "Return to menu", "proceed": "Proceed", "engine": "Engine", "vpn_port": "VPN UDP port", "panel_port": "Panel TCP port", "domain": "Domain (empty for host-only HTTP)", "enable_tls": "Enable TLS with Caddy", "panel_restriction": "Optional panel IP restriction", "vds_address": "VDS address", "vds_required": "VDS address is required", "ssh_user": "SSH user", "ssh_port": "SSH port", "ssh_auth": "SSH auth method", "identity_file": "SSH identity file", "known_hosts": "known_hosts file (empty for system default)", "password_notice": "SSH password will be requested interactively by OpenSSH; it is not handled or stored by awg-vds.",
+	}[key]
 }

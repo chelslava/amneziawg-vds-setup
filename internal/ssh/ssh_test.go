@@ -34,6 +34,16 @@ func TestArgsFailClosedAndAllowExplicitKnownHosts(t *testing.T) {
 	}
 }
 
+func TestArgsEnableInteractivePasswordFallbackWithoutIdentity(t *testing.T) {
+	c := Client{Options: config.Options{Host: "vpn.example.com", User: "root", SSHPort: 22}}
+	args := strings.Join(c.args(), " ")
+	for _, want := range []string{"PreferredAuthentications=publickey,password,keyboard-interactive", "PasswordAuthentication=yes", "KbdInteractiveAuthentication=yes"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("SSH args lack interactive fallback %q: %s", want, args)
+		}
+	}
+}
+
 func TestWriteRedactedFiltersStderr(t *testing.T) {
 	var out bytes.Buffer
 	writeRedacted(&out, "PASSWORD_HASH=secret\nstatus=healthy\n")

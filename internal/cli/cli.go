@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -32,7 +31,7 @@ type remoteRunner interface {
 
 func Run(args []string, out, errOut io.Writer) error {
 	if len(args) == 0 {
-		return interactiveMenu(bufio.NewReader(os.Stdin), out, errOut)
+		return interactiveTUI(os.Stdin, out, errOut)
 	}
 	if args[0] == "help" || args[0] == "--help" {
 		usage(out)

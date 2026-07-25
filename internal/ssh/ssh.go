@@ -28,6 +28,11 @@ func (c Client) args() []string {
 	}
 	if c.Options.Identity != "" {
 		a = append(a, "-i", c.Options.Identity, "-o", "IdentitiesOnly=yes")
+	} else {
+		// Keep password handling inside OpenSSH. The CLI never reads, stores, or
+		// puts the password in argv; these options make interactive fallback
+		// reliable on Windows OpenSSH and Unix terminals alike.
+		a = append(a, "-o", "PreferredAuthentications=publickey,password,keyboard-interactive", "-o", "PasswordAuthentication=yes", "-o", "KbdInteractiveAuthentication=yes")
 	}
 	return append(a, c.Options.User+"@"+c.Options.Host)
 }
