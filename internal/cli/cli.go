@@ -47,6 +47,10 @@ func runCommand(args []string, out, errOut io.Writer) error {
 type thirdPartyRepoPrompt func() bool
 
 func runCommandWithPrompt(args []string, out, errOut io.Writer, prompt thirdPartyRepoPrompt) error {
+	return runCommandWithPromptContext(context.Background(), args, out, errOut, prompt, "")
+}
+
+func runCommandWithPromptContext(ctx context.Context, args []string, out, errOut io.Writer, prompt thirdPartyRepoPrompt, password string) error {
 	if containsSecretFlag(args) {
 		return errors.New("password flags are forbidden; SSH password authentication is interactive only")
 	}
@@ -65,13 +69,18 @@ func runCommandWithPrompt(args []string, out, errOut io.Writer, prompt thirdPart
 		return err
 	}
 	c := ssh.Client{Options: o, Stdin: os.Stdin, Stderr: errOut}
+	if streamed, ok := out.(interface{ StreamedOutput() bool }); ok && streamed.StreamedOutput() {
+		c.Stdout = out
+	}
+	if password != "" {
+		c.SetPassword(password)
+	}
 	defer c.ForgetPassword()
 	cleanupSSH, err := c.EnableConnectionReuse()
 	if err != nil {
 		return fmt.Errorf("prepare SSH connection reuse: %w", err)
 	}
 	defer cleanupSSH()
-	ctx := context.Background()
 	switch o.Command {
 	case "doctor":
 		return doctor(ctx, &c, o, out)
@@ -91,7 +100,11 @@ func runCommandWithPrompt(args []string, out, errOut io.Writer, prompt thirdPart
 }
 
 func parse(args []string) (config.Options, *flag.FlagSet, error) {
-	o := config.Options{Command: args[0], SSHPort: 22, User: "root", Engine: config.Legacy, VPNPort: 1234, WebPort: 51821, TimeoutSecs: 120}
+	defaultTimeout := 120
+	if args[0] == "install" {
+		defaultTimeout = 900
+	}
+	o := config.Options{Command: args[0], SSHPort: 22, User: "root", Engine: config.Legacy, VPNPort: 1234, WebPort: 51821, TimeoutSecs: defaultTimeout}
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&o.Host, "host", "", "VDS address")
@@ -106,7 +119,7 @@ func parse(args []string) (config.Options, *flag.FlagSet, error) {
 	fs.BoolVar(&o.TLS, "tls", false, "enable pinned Caddy TLS proxy")
 	fs.StringVar(&o.RestrictIP, "restrict-panel-ip", "", "allow direct panel access only from this IP when TLS is enabled")
 	fs.BoolVar(&o.Force, "force", false, "reserved for explicit destructive operations")
-	fs.IntVar(&o.TimeoutSecs, "timeout", 120, "SSH command timeout in seconds")
+	fs.IntVar(&o.TimeoutSecs, "timeout", defaultTimeout, "SSH command timeout in seconds")
 	if err := fs.Parse(args[1:]); err != nil {
 		return o, fs, err
 	}

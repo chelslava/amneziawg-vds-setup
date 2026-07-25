@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- TUI получил operation screen с live-логами, elapsed timer, scroll/cancel,
+  summary перед изменениями, recovery actions после ошибок и безопасные локальные
+  профили подключения без секретов.
+
 - Ошибка отсутствующего upstream-модуля AmneziaWG теперь показывает отдельные
   рекомендации: проверить kernel/module через `doctor` или выбрать `legacy` для
   VDS без поддержки upstream.
@@ -13,6 +17,8 @@
   `modprobe` получает отдельные рекомендации вместо SSH-подсказки.
 - Перед всеми upstream-зависимостями выполняется `apt full-upgrade -y`; reboot
   никогда не выполняется автоматически, а требуется только отдельной рекомендацией.
+- Для `install` стандартный SSH timeout увеличен до 15 минут, чтобы полный upgrade
+  и DKMS-сборка не обрывались через 120 секунд; `--timeout` остаётся доступен.
 
 - Исправлен Windows-сбой `getsockname failed: Not a socket`: `ControlPath` теперь
   используется только на Unix, а пароль вводится один раз без echo через

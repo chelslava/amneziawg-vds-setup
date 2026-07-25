@@ -27,6 +27,31 @@ type Client struct {
 	passwordSet bool
 }
 
+// SetPassword supplies an already-collected interactive password for this
+// operation. It is kept only in memory and is cleared by ForgetPassword.
+func (c *Client) SetPassword(password string) {
+	c.password = password
+	c.passwordSet = true
+}
+
+// ReadInteractivePassword reads a password without echoing it. The caller is
+// responsible for using it only for the current operation.
+func ReadInteractivePassword(w io.Writer) (string, error) {
+	if !term.IsTerminal(os.Stdin.Fd()) {
+		return "", fmt.Errorf("SSH password requires an interactive terminal; use --identity-file for non-interactive runs")
+	}
+	if w == nil {
+		w = os.Stderr
+	}
+	_, _ = fmt.Fprint(w, "SSH password (entered once): ")
+	password, err := term.ReadPassword(os.Stdin.Fd())
+	_, _ = fmt.Fprintln(w)
+	if err != nil {
+		return "", fmt.Errorf("read SSH password: %w", err)
+	}
+	return string(password), nil
+}
+
 // ForgetPassword clears the in-memory password after an operation completes.
 func (c *Client) ForgetPassword() {
 	password := []byte(c.password)
@@ -98,16 +123,28 @@ func (c *Client) Run(ctx context.Context, command string) (string, error) {
 	if cmd.Stdin == nil {
 		cmd.Stdin = os.Stdin
 	}
+	stderrTarget := c.Stderr
+	stderrStreamed := stderrTarget != nil
+	if stderrTarget == nil {
+		stderrTarget = os.Stderr
+	}
 	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	if c.Stdout != nil {
+		cmd.Stdout = io.MultiWriter(&stdout, redactedWriter{w: c.Stdout})
+	} else {
+		cmd.Stdout = &stdout
+	}
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if c.Stderr == nil {
-		c.Stderr = os.Stderr
+	if stderrStreamed {
+		cmd.Stderr = io.MultiWriter(&stderr, redactedWriter{w: stderrTarget})
+	} else {
+		cmd.Stderr = &stderr
 	}
 	cmd.Env = c.commandEnv()
 	if err := cmd.Run(); err != nil {
-		writeRedacted(c.Stderr, stderr.String())
+		if !stderrStreamed {
+			writeRedacted(stderrTarget, stderr.String())
+		}
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("SSH command timed out: %w", ctx.Err())
 		}
@@ -117,28 +154,35 @@ func (c *Client) Run(ctx context.Context, command string) (string, error) {
 		}
 		return sanitize(stdout.String()), fmt.Errorf("SSH command failed: %w", err)
 	}
-	writeRedacted(c.Stderr, stderr.String())
+	if !stderrStreamed {
+		writeRedacted(stderrTarget, stderr.String())
+	}
 	return sanitize(stdout.String()), nil
+}
+
+type redactedWriter struct{ w io.Writer }
+
+func (w redactedWriter) Write(p []byte) (int, error) {
+	if w.w == nil {
+		return len(p), nil
+	}
+	_, err := io.WriteString(w.w, sanitize(string(p)))
+	return len(p), err
 }
 
 func (c *Client) ensurePassword() error {
 	if c.Options.Identity != "" || c.passwordSet {
 		return nil
 	}
-	if !term.IsTerminal(os.Stdin.Fd()) {
-		return fmt.Errorf("SSH password requires an interactive terminal; use --identity-file for non-interactive runs")
-	}
 	w := c.Stderr
 	if w == nil {
 		w = os.Stderr
 	}
-	_, _ = fmt.Fprint(w, "SSH password (entered once): ")
-	password, err := term.ReadPassword(os.Stdin.Fd())
-	_, _ = fmt.Fprintln(w)
+	password, err := ReadInteractivePassword(w)
 	if err != nil {
-		return fmt.Errorf("read SSH password: %w", err)
+		return err
 	}
-	c.password = string(password)
+	c.password = password
 	c.passwordSet = true
 	return nil
 }
@@ -175,6 +219,9 @@ func Redact(s string) string { return sanitize(strings.TrimSpace(s)) }
 
 func PrintOutput(w io.Writer, output string) {
 	if w == nil {
+		return
+	}
+	if streamed, ok := w.(interface{ StreamedOutput() bool }); ok && streamed.StreamedOutput() {
 		return
 	}
 	_, _ = io.Copy(w, strings.NewReader(sanitize(output)))

@@ -90,6 +90,15 @@ func TestErrorNoticeExplainsMissingKernelHeaders(t *testing.T) {
 	}
 }
 
+func TestErrorNoticeExplainsLongOperationTimeout(t *testing.T) {
+	_, notice := errorNotice(langRU, "install", errors.New("SSH command timed out: context deadline exceeded"))
+	for _, want := range []string{"apt full-upgrade", "15 минут", "--timeout 1800"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("missing timeout recommendation %q in %s", want, notice)
+		}
+	}
+}
+
 func TestTUILanguageSelectionPrecedesActionMenu(t *testing.T) {
 	model := tuiModel{}
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -174,5 +183,33 @@ func TestPromptBackReturnsNavigationSignal(t *testing.T) {
 	_, err := prompt(bufio.NewReader(strings.NewReader("back\n")), &strings.Builder{}, "Host", "")
 	if !errors.Is(err, errTUIBack) {
 		t.Fatalf("back command did not return navigation signal: %v", err)
+	}
+}
+
+func TestOperationSummaryContainsSafeReviewData(t *testing.T) {
+	lines := operationSummary([]string{"install", "--host", "vpn.example", "--user", "root", "--ssh-port", "22", "--engine", "upstream", "--vpn-port", "1234", "--web-port", "51821", "--tls"}, langRU)
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"vpn.example", "upstream", "TLS: enabled", "password"} {
+		if want == "password" {
+			if !strings.Contains(joined, "(password)") {
+				t.Fatalf("summary did not show auth method: %s", joined)
+			}
+			continue
+		}
+		if !strings.Contains(joined, want) {
+			t.Fatalf("summary lacks %q: %s", want, joined)
+		}
+	}
+}
+
+func TestOperationRecoveryCommandsPreserveConnection(t *testing.T) {
+	args := []string{"install", "--host", "vpn.example", "--user", "root", "--engine", "upstream"}
+	doctor := commandAsDoctor(args)
+	legacy := commandAsLegacy(args)
+	if doctor[0] != "doctor" || doctor[2] != "vpn.example" {
+		t.Fatalf("doctor recovery changed connection: %v", doctor)
+	}
+	if legacy[0] != "install" || strings.Join(legacy, " ") != "install --host vpn.example --user root --engine legacy" {
+		t.Fatalf("legacy recovery unexpected: %v", legacy)
 	}
 }

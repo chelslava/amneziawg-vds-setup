@@ -78,6 +78,17 @@ func TestWriteRedactedFiltersStderr(t *testing.T) {
 	}
 }
 
+func TestRedactedWriterFiltersStreamedSecrets(t *testing.T) {
+	var out bytes.Buffer
+	w := redactedWriter{w: &out}
+	if _, err := w.Write([]byte("PASSWORD_HASH=secret\nstatus=healthy\n")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "secret") || !strings.Contains(out.String(), "healthy") {
+		t.Fatalf("streamed redaction failed: %q", out.String())
+	}
+}
+
 func contains(s, part string) bool {
 	for i := 0; i+len(part) <= len(s); i++ {
 		if s[i:i+len(part)] == part {

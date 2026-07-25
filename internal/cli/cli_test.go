@@ -20,6 +20,23 @@ func TestParseInstallArguments(t *testing.T) {
 	}
 }
 
+func TestInstallUsesLongerDefaultSSHTimeout(t *testing.T) {
+	install, _, err := parse([]string{"install", "--host", "vpn.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if install.TimeoutSecs != 900 {
+		t.Fatalf("install timeout = %d, want 900", install.TimeoutSecs)
+	}
+	status, _, err := parse([]string{"status", "--host", "vpn.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.TimeoutSecs != 120 {
+		t.Fatalf("status timeout = %d, want 120", status.TimeoutSecs)
+	}
+}
+
 func TestPasswordArgumentsRejected(t *testing.T) {
 	if !containsSecretFlag([]string{"install", "--host", "x", "--password=secret"}) {
 		t.Fatal("password argument was not rejected")

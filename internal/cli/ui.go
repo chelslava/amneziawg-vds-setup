@@ -99,18 +99,37 @@ func interactiveConnectionLanguage(in lineInput, out io.Writer, lang uiLanguage)
 }
 
 func interactiveConnectionLanguageMode(in lineInput, raw io.Reader, out io.Writer, lang uiLanguage, useDropdown bool) ([]string, error) {
-	host, err := prompt(in, out, tr(lang, "vds_address"), "")
+	profile := uiProfile{}
+	profileName := ""
+	var err error
+	if useDropdown {
+		profile, profileName, err = selectUIProfile(raw, out, lang)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		profile = loadUIProfile()
+	}
+	host, err := prompt(in, out, tr(lang, "vds_address"), profile.Host)
 	if err != nil {
 		return nil, err
 	}
 	if host == "" {
 		return nil, errors.New(tr(lang, "vds_required"))
 	}
-	user, err := prompt(in, out, tr(lang, "ssh_user"), "root")
+	userDefault := profile.User
+	if userDefault == "" {
+		userDefault = "root"
+	}
+	user, err := prompt(in, out, tr(lang, "ssh_user"), userDefault)
 	if err != nil {
 		return nil, err
 	}
-	port, err := promptInt(in, out, tr(lang, "ssh_port"), 22)
+	portDefault := profile.SSHPort
+	if portDefault == 0 {
+		portDefault = 22
+	}
+	port, err := promptInt(in, out, tr(lang, "ssh_port"), portDefault)
 	if err != nil {
 		return nil, err
 	}
@@ -120,12 +139,12 @@ func interactiveConnectionLanguageMode(in lineInput, raw io.Reader, out io.Write
 	}
 	identity := ""
 	if authMethod == "key" {
-		identity, err = prompt(in, out, tr(lang, "identity_file"), "")
+		identity, err = prompt(in, out, tr(lang, "identity_file"), profile.Identity)
 		if err != nil {
 			return nil, err
 		}
 	}
-	knownHosts, err := prompt(in, out, tr(lang, "known_hosts"), "")
+	knownHosts, err := prompt(in, out, tr(lang, "known_hosts"), profile.KnownHosts)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +156,9 @@ func interactiveConnectionLanguageMode(in lineInput, raw io.Reader, out io.Write
 	}
 	if knownHosts != "" {
 		args = append(args, "--known-hosts", knownHosts)
+	}
+	if useDropdown {
+		saveUIProfileNamed(profileName, uiProfile{Host: host, User: user, SSHPort: port, Identity: identity, KnownHosts: knownHosts})
 	}
 	return args, nil
 }
