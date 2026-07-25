@@ -704,9 +704,9 @@ func errorNotice(lang uiLanguage, action string, err error) (string, string) {
 		}
 	} else if strings.Contains(strings.ToLower(detail), "docker: command not found") || strings.Contains(strings.ToLower(detail), "docker=missing") {
 		if lang == langRU {
-			recommendation = []string{"Docker Compose установлен, но команда docker недоступна на сервере.", "Запустите doctor и проверьте пакет Docker, PATH и состояние docker.service.", "Для Ubuntu/Debian переустановите docker.io; для Fedora/RHEL-подобных систем проверьте пакет docker и репозитории.", "После исправления повторите install: конфигурация уже сохранена безопасно."}
+			recommendation = []string{"Docker Compose установлен, но команда docker недоступна на сервере.", "На Debian docker.io и docker-cli могут быть отдельными пакетами; установщик v2.4.2 проверяет и восстанавливает оба.", "Запустите doctor и проверьте пакет Docker, PATH и состояние docker.service.", "После исправления повторите install: конфигурация уже сохранена безопасно."}
 		} else {
-			recommendation = []string{"Docker Compose is installed, but the docker command is unavailable on the server.", "Run doctor and check the Docker package, PATH, and docker.service status.", "On Ubuntu/Debian reinstall docker.io; on Fedora/RHEL-like systems check the docker package and repositories.", "After fixing Docker, retry install; the protected configuration is safe to reconcile."}
+			recommendation = []string{"Docker Compose is installed, but the docker command is unavailable on the server.", "On Debian, docker.io and docker-cli may be separate packages; v2.4.2 checks and repairs both.", "Run doctor and check the Docker package, PATH, and docker.service status.", "After fixing Docker, retry install; the protected configuration is safe to reconcile."}
 		}
 	} else if strings.Contains(strings.ToLower(detail), "kernel-upgrade-failed") {
 		if lang == langRU {
