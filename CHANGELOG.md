@@ -11,6 +11,7 @@
 - Production v2 images переведены на immutable digests; Legacy использует существующий GHCR `0.2.15`, поскольку прежний tag `1.0.1` больше не опубликован. Legacy v1 `latest` не изменён.
 - State validation теперь ограничивает engine-specific container/image contracts, managed paths под `/opt/awg-vds`, panel IP и backup metadata; tampered lifecycle state отклоняется до выполнения remote command.
 - Doctor обновляет APT metadata перед upstream module probe, dependencies гарантируют `curl`, а package install и `modprobe` failures получают явные diagnostics.
+- Summary теперь показывает фактический panel URL с web port для HTTP и `https://domain` для TLS, а также отдельный внешний reachability probe.
 
 ## v2.0.0 — 2026-07-25
 

@@ -60,7 +60,7 @@ Legacy и AmneziaWG 2.0 — разные сценарии. v2 не генери�
 
 ## State и backup
 
-`--domain` используется только вместе с `--tls`; домен без TLS CLI отклоняет. После успешного health-check state получает deployed image и метаданные последнего backup.
+`--domain` используется только вместе с `--tls`; домен без TLS CLI отклоняет. После успешного health-check state получает deployed image, panel host и метаданные последнего backup. Финальный summary отдельно показывает remote-local health и операторскую external panel reachability.
 
 Серверное состояние хранится в `/opt/awg-vds/install-state.json` и содержит engine, pinned image, порты, домен, TLS-режим, даты, пути и метаданные последнего backup (путь и SHA-256). SSH-пароли, приватные ключи, `PASSWORD_HASH` и клиентские конфигурации туда не записываются.
 

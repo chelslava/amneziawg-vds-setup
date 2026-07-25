@@ -103,6 +103,17 @@ func TestUpstreamPreflightRefreshesMetadata(t *testing.T) {
 	}
 }
 
+func TestPanelURLUsesPersistedHostAndPort(t *testing.T) {
+	hostOnly := state.State{PanelHost: "198.51.100.7", WebPort: 51821, TLSMode: "disabled"}
+	if got := panelURL(hostOnly); got != "http://198.51.100.7:51821" {
+		t.Fatalf("unexpected host-only panel URL: %s", got)
+	}
+	tls := state.State{Domain: "vpn.example.com", PanelHost: "vpn.example.com", WebPort: 51821, TLSMode: "caddy"}
+	if got := panelURL(tls); got != "https://vpn.example.com" {
+		t.Fatalf("unexpected TLS panel URL: %s", got)
+	}
+}
+
 func TestDependenciesIncludeHealthAndModuleDiagnostics(t *testing.T) {
 	cmd := dependenciesCommand(true)
 	for _, want := range []string{"apt-get install -y curl", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {

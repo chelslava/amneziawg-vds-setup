@@ -7,7 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -401,18 +404,39 @@ func readState(ctx context.Context, c remoteRunner) (state.State, bool, error) {
 }
 func errOut(out io.Writer) io.Writer { return out }
 func printSummary(out io.Writer, s state.State) {
-	panel := "http://"
-	if s.TLSMode == "caddy" {
-		panel = "https://"
+	fmt.Fprintf(out, "Panel: %s\nVPN: UDP %d\nEngine: %s\nBackups: %s\nState: %s\n", panelURL(s), s.VPNPort, s.Engine, s.BackupPath, state.Path)
+	if s.PanelHost != "" {
+		fmt.Fprintln(out, "External panel:", externalPanelStatus(s))
+	} else {
+		fmt.Fprintln(out, "External panel: not checked (state has no panel host metadata)")
 	}
-	host := s.Domain
-	if host == "" {
-		host = "<VDS-address>"
-	}
-	fmt.Fprintf(out, "Panel: %s%s\nVPN: UDP %d\nEngine: %s\nBackups: %s\nState: %s\n", panel, host, s.VPNPort, s.Engine, s.BackupPath, state.Path)
 	if s.TLSMode == "disabled" {
 		fmt.Fprintln(out, "WARNING: web panel is plain HTTP; configure TLS or restrict panel access by IP.")
 	}
+}
+
+func panelURL(s state.State) string {
+	host := s.Domain
+	if host == "" {
+		host = s.PanelHost
+	}
+	if host == "" {
+		host = "<VDS-address>"
+	}
+	if s.TLSMode == "caddy" {
+		return "https://" + host
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(s.WebPort))
+}
+
+func externalPanelStatus(s state.State) string {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(panelURL(s))
+	if err != nil {
+		return "unreachable (" + err.Error() + ")"
+	}
+	defer resp.Body.Close()
+	return fmt.Sprintf("reachable (HTTP %d)", resp.StatusCode)
 }
 func usage(out io.Writer) {
 	fmt.Fprintln(out, "awg-vds v2.0.0 — cross-platform AmneziaWG VDS installer")
