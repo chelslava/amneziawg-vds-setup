@@ -78,6 +78,7 @@ Backup создаётся на сервере в `/opt/awg-vds/backups/` с UTC-
 - Не используйте `--password`, `--ssh-password` и другие секретные аргументы — CLI их отклоняет.
 - Не передавайте `PASSWORD_HASH`, приватные ключи или клиентские `.conf` через логи.
 - Образы v2 используют immutable digest; обновление происходит только для явно закреплённого image reference в state. Legacy v1 PowerShell сохраняет отдельный исторический `latest` контракт.
+- APT используется только через системные подписанные метаданные Ubuntu/Debian: v2 передаёт `AllowInsecureRepositories=false` и `AllowUnauthenticated=false`, поэтому unsigned/unauthenticated source останавливает установку. Обновление digest или action SHA требует сверки upstream release, локального `go test`/`go vet` и CI run; исходные v1 pins не переносите в v2 автоматически.
 - Передавайте ключ через `--identity-file`; после настройки отключите SSH password login и root password login.
 - Проверьте ownership VDS до запуска. TLS требует, чтобы DNS уже указывал на VDS.
 

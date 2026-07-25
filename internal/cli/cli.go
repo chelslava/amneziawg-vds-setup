@@ -395,9 +395,11 @@ func configurationDrift(s state.State, o config.Options) []string {
 }
 
 func dependenciesCommand(upstream bool) string {
-	cmd := "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; command -v docker >/dev/null 2>&1 || (apt-get update; apt-get install -y ca-certificates apache2-utils openssl curl docker.io docker-compose-plugin); command -v htpasswd >/dev/null 2>&1 || apt-get install -y apache2-utils; command -v openssl >/dev/null 2>&1 || apt-get install -y openssl; command -v curl >/dev/null 2>&1 || (apt-get update; apt-get install -y curl); systemctl enable --now docker; "
+	aptUpdate := "apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update"
+	aptInstall := "apt-get -o APT::Get::AllowUnauthenticated=false install -y"
+	cmd := fmt.Sprintf("set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; command -v docker >/dev/null 2>&1 || (%s; %s ca-certificates apache2-utils openssl curl docker.io docker-compose-plugin); command -v htpasswd >/dev/null 2>&1 || %s apache2-utils; command -v openssl >/dev/null 2>&1 || %s openssl; command -v curl >/dev/null 2>&1 || (%s; %s curl); systemctl enable --now docker; ", aptUpdate, aptInstall, aptInstall, aptInstall, aptUpdate, aptInstall)
 	if upstream {
-		cmd += "if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then apt-get update; if ! apt-get install -y amneziawg; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi; if module_error=$(modprobe amneziawg 2>&1); then printf 'AMNEZIAWG=module-loaded\\n'; else printf 'AMNEZIAWG=module-load-failed %s\\n' \"$module_error\" >&2; exit 1; fi; fi; "
+		cmd += fmt.Sprintf("if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then %s; if ! %s amneziawg; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi; if module_error=$(modprobe amneziawg 2>&1); then printf 'AMNEZIAWG=module-loaded\\n'; else printf 'AMNEZIAWG=module-load-failed %%s\\n' \"$module_error\" >&2; exit 1; fi; fi; ", aptUpdate, aptInstall)
 	}
 	return cmd + "printf 'DEPENDENCIES=ok\\n'"
 }
