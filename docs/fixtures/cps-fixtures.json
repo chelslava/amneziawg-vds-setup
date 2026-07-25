@@ -1,0 +1,7 @@
+[
+  {"name":"valid-template","mode":"import","fields":{"I1":"<b 0xf6ab3267><rc 8><t><r 16>"},"valid":true},
+  {"name":"missing-middle-packet","mode":"import","fields":{"I1":"<b 0x01>","I3":"<t>"},"valid":true},
+  {"name":"invalid-hex","mode":"import","fields":{"I1":"<b 0xnot-hex>"},"valid":false,"error":"malformed hex"},
+  {"name":"oversized-random","mode":"import","fields":{"I1":"<r 1001>"},"valid":false,"error":"random length exceeds 1000"},
+  {"name":"empty-import","mode":"import","fields":{},"valid":false,"error":"at least one CPS field is required"}
+]

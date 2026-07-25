@@ -17,6 +17,7 @@
 - CI отделён от release: Go test/vet, native Windows/Linux/macOS smoke, immutable-reference scan и pinned Pester 5.7.1 для v1 Legacy.
 - Добавлен manual disposable-VDS E2E harness для Ubuntu/Debian с pinned known_hosts и always-cleanup; provider provisioning остаётся настройкой GitHub environment.
 - APT dependency paths теперь fail-closed при insecure или unauthenticated repositories.
+- Описан design-only CPS I1–I5 контракт с явным opt-in, раздельными правилами matching, secret boundaries и parser fixtures; автоматическая генерация не включена.
 
 ## v2.0.0 — 2026-07-25
 
