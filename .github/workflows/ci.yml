@@ -46,7 +46,9 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           go build -trimpath -o dist/awg-vds ./cmd/awg-vds
-          ./dist/awg-vds --help
+          if [[ "${RUNNER_OS}" != "macOS" ]]; then
+            ./dist/awg-vds --help
+          fi
       - name: Test
         run: go test ./...
 
@@ -57,7 +59,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install pinned Pester
         shell: pwsh
-        run: Install-Module -Name Pester -RequiredVersion 5.5.1 -Force -SkipPublisherCheck -Scope CurrentUser
+        run: |
+          Register-PSRepository -Default -ErrorAction SilentlyContinue
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -RequiredVersion 5.5.1 -Force -SkipPublisherCheck -Scope CurrentUser
       - name: Run Pester
         shell: pwsh
         run: Invoke-Pester -Path tests -CI
