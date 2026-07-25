@@ -9,7 +9,7 @@ import (
 )
 
 func TestEncodeDecodeStateContainsNoSecrets(t *testing.T) {
-	s := State{Version: 1, Engine: config.Legacy, Image: "ghcr.io/yokitoki/awg-easy:1.0.1", Container: "awg-vds-legacy", VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
+	s := State{Version: 1, Engine: config.Legacy, Image: "ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f", Container: "awg-vds-legacy", VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
 	b, err := Encode(s)
 	if err != nil {
 		t.Fatal(err)

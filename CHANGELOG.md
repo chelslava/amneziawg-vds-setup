@@ -8,6 +8,7 @@
 - Backup расширен до полного deployment snapshot; добавлены fake-SSH lifecycle tests и command-builder tests для P0-контрактов.
 - Повторный `install` теперь читает state до проверки занятых портов, принимает ожидаемый busy порт при безопасном reconcile и явно сообщает configuration drift вместо его молчаливого игнорирования.
 - SSH теперь использует fail-closed host-key verification (`StrictHostKeyChecking=yes`) с опциональным `--known-hosts`; remote stderr проходит тот же secret redaction, что и stdout.
+- Production v2 images переведены на immutable digests; Legacy использует существующий GHCR `0.2.15`, поскольку прежний tag `1.0.1` больше не опубликован. Legacy v1 `latest` не изменён.
 
 ## v2.0.0 — 2026-07-25
 

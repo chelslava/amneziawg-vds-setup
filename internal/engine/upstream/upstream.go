@@ -9,7 +9,7 @@ import (
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/state"
 )
 
-const Image = "ghcr.io/wg-easy/wg-easy:15.2.1"
+const Image = "ghcr.io/wg-easy/wg-easy@sha256:4ffc03c35dce5456bbb2fa6b136a1eeb196394548dee0650ae692efdd1062e01"
 
 type Engine struct{}
 

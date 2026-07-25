@@ -9,7 +9,7 @@ import (
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/state"
 )
 
-const Image = "ghcr.io/yokitoki/awg-easy:1.0.1"
+const Image = "ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f"
 
 type Engine struct{}
 

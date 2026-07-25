@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const Image = "caddy:2.9.1-alpine"
+const Image = "caddy@sha256:b4e3952384eb9524a887633ce65c752dd7c71314d2c2acf98cd5c715aaa534f0"
 
 func Command(enabled bool, domain string, webPort int) string {
 	if !enabled {

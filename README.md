@@ -39,14 +39,14 @@ awg-vds backup --host HOST [connection flags]
 
 ### `legacy` — стабильный сценарий v1
 
-- Образ: `ghcr.io/yokitoki/awg-easy:1.0.1`.
+- Образ: `ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f` (Legacy `0.2.15`, amd64).
 - `--network host`, общий каталог `/opt/awg-vds/wireguard` монтируется в `/etc/amnezia/amneziawg` и `/etc/wireguard`.
 - Предназначен для Legacy-параметров AmneziaWG и совместимости с WireSock.
 - Поддерживается только Linux amd64; ARM отклоняется до начала установки.
 
 ### `upstream` — экспериментальный сценарий
 
-- Образ: `ghcr.io/wg-easy/wg-easy:15.2.1`.
+- Образ: `ghcr.io/wg-easy/wg-easy@sha256:4ffc03c35dce5456bbb2fa6b136a1eeb196394548dee0650ae692efdd1062e01` (upstream `15.2.1`).
 - Проверяет наличие или installability `amneziawg`, пытается установить пакет из настроенных репозиториев и включает `EXPERIMENTAL_AWG=true`.
 - Требует kernel module AmneziaWG; если модуль недоступен, установка останавливается с диагностикой.
 - Это не миграция Legacy и не обновление Legacy. Разворачивайте его как отдельную новую установку.
@@ -74,7 +74,7 @@ Backup создаётся на сервере в `/opt/awg-vds/backups/` с UTC-
 
 - Не используйте `--password`, `--ssh-password` и другие секретные аргументы — CLI их отклоняет.
 - Не передавайте `PASSWORD_HASH`, приватные ключи или клиентские `.conf` через логи.
-- Образы не используют `latest`; обновление происходит только для закреплённого тега в state.
+- Образы v2 используют immutable digest; обновление происходит только для явно закреплённого image reference в state. Legacy v1 PowerShell сохраняет отдельный исторический `latest` контракт.
 - Передавайте ключ через `--identity-file`; после настройки отключите SSH password login и root password login.
 - Проверьте ownership VDS до запуска. TLS требует, чтобы DNS уже указывал на VDS.
 
