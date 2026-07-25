@@ -4,7 +4,7 @@
 
 ## Установка бинарника
 
-Скачайте архив для своей платформы из [GitHub Release v2.0.0](https://github.com/chelslava/amneziawg-vds-setup/releases/tag/v2.0.0), проверьте `SHA256SUMS` и добавьте `awg-vds` в `PATH`.
+Скачайте архив для своей платформы из [GitHub Release v2.2.0](https://github.com/chelslava/amneziawg-vds-setup/releases/tag/v2.2.0), проверьте `SHA256SUMS` и добавьте `awg-vds` в `PATH`.
 
 Для сборки из исходников нужен Go 1.25+:
 
