@@ -22,7 +22,10 @@ type Client struct {
 }
 
 func (c Client) args() []string {
-	a := []string{"-p", fmt.Sprint(c.Options.SSHPort), "-o", "ConnectTimeout=15", "-o", "BatchMode=no", "-o", "StrictHostKeyChecking=accept-new"}
+	a := []string{"-p", fmt.Sprint(c.Options.SSHPort), "-o", "ConnectTimeout=15", "-o", "BatchMode=no", "-o", "StrictHostKeyChecking=yes"}
+	if c.Options.KnownHosts != "" {
+		a = append(a, "-o", "UserKnownHostsFile="+c.Options.KnownHosts)
+	}
 	if c.Options.Identity != "" {
 		a = append(a, "-i", c.Options.Identity, "-o", "IdentitiesOnly=yes")
 	}
@@ -44,16 +47,23 @@ func (c Client) Run(ctx context.Context, command string) (string, error) {
 	}
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if c.Stderr == nil {
 		c.Stderr = os.Stderr
 	}
-	cmd.Stderr = c.Stderr
 	if err := cmd.Run(); err != nil {
+		writeRedacted(c.Stderr, stderr.String())
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("SSH command timed out: %w", ctx.Err())
 		}
+		detail := strings.TrimSpace(sanitize(stderr.String()))
+		if detail != "" {
+			return sanitize(stdout.String()), fmt.Errorf("SSH command failed: %w: %s", err, detail)
+		}
 		return sanitize(stdout.String()), fmt.Errorf("SSH command failed: %w", err)
 	}
+	writeRedacted(c.Stderr, stderr.String())
 	return sanitize(stdout.String()), nil
 }
 
@@ -73,4 +83,11 @@ func PrintOutput(w io.Writer, output string) {
 		return
 	}
 	_, _ = io.Copy(w, strings.NewReader(sanitize(output)))
+}
+
+func writeRedacted(w io.Writer, output string) {
+	if w == nil || output == "" {
+		return
+	}
+	_, _ = io.WriteString(w, sanitize(output))
 }

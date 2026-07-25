@@ -13,7 +13,7 @@ go test ./...
 $env:GOOS='windows'; $env:GOARCH='amd64'; go build -trimpath -ldflags='-s -w' -o dist/awg-vds-windows-amd64.exe ./cmd/awg-vds
 ```
 
-Поддерживаемые артефакты: Windows amd64, Linux amd64, macOS amd64 и arm64. OpenSSH (`ssh`) должен быть доступен в `PATH`. Пароль SSH никогда не принимается флагом и вводится только самим OpenSSH в интерактивном режиме; предпочтителен ключ:
+Поддерживаемые артефакты: Windows amd64, Linux amd64, macOS amd64 и arm64. OpenSSH (`ssh`) должен быть доступен в `PATH`. По умолчанию CLI требует уже проверенный ключ сервера в системном `known_hosts` и использует fail-closed host-key checking; для отдельного файла используйте `--known-hosts`. Пароль SSH никогда не принимается флагом и вводится только самим OpenSSH в интерактивном режиме; предпочтителен ключ:
 
 ```text
 awg-vds install --host vpn.example.com --user root --identity-file ~/.ssh/id_ed25519 --engine legacy
@@ -22,7 +22,7 @@ awg-vds install --host vpn.example.com --user root --identity-file ~/.ssh/id_ed2
 ## Команды
 
 ```text
-awg-vds install --host HOST [--ssh-port 22] [--user root] [--identity-file PATH]
+awg-vds install --host HOST [--ssh-port 22] [--user root] [--identity-file PATH] [--known-hosts PATH]
                  [--engine legacy|upstream] [--vpn-port 1234] [--web-port 51821]
                  [--domain vpn.example.com --tls] [--restrict-panel-ip IP]
 awg-vds doctor --host HOST [--engine legacy|upstream]

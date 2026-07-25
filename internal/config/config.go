@@ -22,6 +22,7 @@ type Options struct {
 	SSHPort     int
 	User        string
 	Identity    string
+	KnownHosts  string
 	Engine      Engine
 	VPNPort     int
 	WebPort     int
@@ -49,6 +50,9 @@ func (o Options) ValidateConnection() error {
 	}
 	if o.Identity != "" {
 		o.Identity = filepath.Clean(o.Identity)
+	}
+	if o.KnownHosts != "" {
+		o.KnownHosts = filepath.Clean(o.KnownHosts)
 	}
 	return nil
 }

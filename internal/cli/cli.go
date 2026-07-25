@@ -74,6 +74,7 @@ func parse(args []string) (config.Options, *flag.FlagSet, error) {
 	fs.IntVar(&o.SSHPort, "ssh-port", 22, "SSH port")
 	fs.StringVar(&o.User, "user", "root", "SSH user")
 	fs.StringVar(&o.Identity, "identity-file", "", "SSH private key path")
+	fs.StringVar(&o.KnownHosts, "known-hosts", "", "SSH known_hosts file")
 	fs.Var(engineValue{&o.Engine}, "engine", "legacy or upstream")
 	fs.IntVar(&o.VPNPort, "vpn-port", 1234, "VPN UDP port")
 	fs.IntVar(&o.WebPort, "web-port", 51821, "web TCP port")
@@ -413,6 +414,6 @@ func printSummary(out io.Writer, s state.State) {
 func usage(out io.Writer) {
 	fmt.Fprintln(out, "awg-vds v2.0.0 — cross-platform AmneziaWG VDS installer")
 	fmt.Fprintln(out, "Commands: install, status, update, backup, doctor")
-	fmt.Fprintln(out, "Common flags: --host HOST --ssh-port 22 --user root --identity-file PATH")
+	fmt.Fprintln(out, "Common flags: --host HOST --ssh-port 22 --user root --identity-file PATH --known-hosts PATH")
 	fmt.Fprintln(out, "Install flags: --engine legacy|upstream --vpn-port 1234 --web-port 51821 --domain NAME --tls --restrict-panel-ip IP")
 }
