@@ -63,7 +63,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'PSResourceGet') | Out-Null
           Unregister-PSResourceRepository -Name PSGallery -ErrorAction SilentlyContinue
           Register-PSResourceRepository -PSGallery
-          Install-PSResource -Name Pester -Version 5.5.1 -Repository PSGallery -TrustRepository -Scope CurrentUser
+          Install-PSResource -Name Pester -Version 5.7.1 -Repository PSGallery -TrustRepository -Scope CurrentUser
       - name: Run Pester
         shell: pwsh
         run: Invoke-Pester -Path tests -CI
