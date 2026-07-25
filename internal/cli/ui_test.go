@@ -81,6 +81,15 @@ func TestErrorNoticeExplainsModuleLoadFailure(t *testing.T) {
 	}
 }
 
+func TestErrorNoticeExplainsMissingKernelHeaders(t *testing.T) {
+	_, notice := errorNotice(langRU, "install", errors.New("SSH command failed: exit status 100: E: Package 'linux-headers-6.8.0-35-generic' has no installation candidate"))
+	for _, want := range []string{"linux-headers", "apt full-upgrade", "перезагрузка", "engine legacy"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("missing kernel-header recommendation %q in %s", want, notice)
+		}
+	}
+}
+
 func TestTUILanguageSelectionPrecedesActionMenu(t *testing.T) {
 	model := tuiModel{}
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})

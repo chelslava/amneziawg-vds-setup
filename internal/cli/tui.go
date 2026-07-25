@@ -239,6 +239,24 @@ func errorNotice(lang uiLanguage, action string, err error) (string, string) {
 		} else {
 			recommendation = []string{"Upstream requires the AmneziaWG kernel module; this OS/kernel does not support it or the repositories are unavailable.", "Run doctor and check the kernel version, architecture, and availability of the amneziawg package/module.", "If the provider cannot load the module, choose engine legacy for WireSock compatibility.", "Legacy and Upstream are separate scenarios; automatic migration between them is not supported."}
 		}
+	} else if strings.Contains(strings.ToLower(detail), "kernel-upgrade-failed") {
+		if lang == langRU {
+			recommendation = []string{"Автоматическое обновление ядра не завершилось.", "Запустите doctor и проверьте APT-репозитории, место на диске и ошибки package manager.", "Исправьте причину и повторите upstream; сервер автоматически не перезагружался.", "Если провайдер блокирует обновление ядра, используйте engine legacy или другой VDS."}
+		} else {
+			recommendation = []string{"The automatic kernel upgrade did not complete.", "Run doctor and check APT repositories, disk space, and package-manager errors.", "Fix the cause and retry upstream; the server was not rebooted automatically.", "If the provider blocks kernel upgrades, use engine legacy or another VDS."}
+		}
+	} else if strings.Contains(strings.ToLower(detail), "kernel-headers-unavailable-after-upgrade") {
+		if lang == langRU {
+			recommendation = []string{"После apt full-upgrade headers для текущего ядра всё ещё недоступны.", "Если установлен новый kernel, перезагрузите VDS вручную и затем повторите upstream.", "Автоматическая перезагрузка запрещена; сначала проверьте doctor после reboot.", "Если headers не публикуются провайдером, используйте engine legacy или другой VDS."}
+		} else {
+			recommendation = []string{"After apt full-upgrade, headers are still unavailable for the running kernel.", "If a new kernel was installed, reboot the VDS manually and retry upstream.", "Automatic reboot is disabled; run doctor after reboot.", "If the provider does not publish headers, use engine legacy or another VDS."}
+		}
+	} else if strings.Contains(strings.ToLower(detail), "kernel-headers-unavailable") || strings.Contains(strings.ToLower(detail), "no installation candidate") {
+		if lang == langRU {
+			recommendation = []string{"Для запущенного ядра нет доступного пакета linux-headers в текущих APT-источниках.", "Проверьте Ubuntu-репозитории и выполните apt full-upgrade; после установки нового ядра потребуется перезагрузка VDS.", "Не перезагружайте сервер автоматически: повторите upstream после reboot и проверьте doctor.", "Если провайдер предоставляет собственное ядро без headers, используйте engine legacy или другой VDS."}
+		} else {
+			recommendation = []string{"No linux-headers package is available for the running kernel in the configured APT sources.", "Check the Ubuntu repositories and run apt full-upgrade; a VDS reboot is required after installing a new kernel.", "The installer does not reboot automatically: retry upstream after reboot and run doctor.", "If the provider supplies a custom kernel without headers, use engine legacy or another VDS."}
+		}
 	} else if strings.Contains(strings.ToLower(detail), "module-load-failed") || strings.Contains(strings.ToLower(detail), "modprobe: fatal") {
 		if lang == langRU {
 			recommendation = []string{"Репозиторий найден, но модуль AmneziaWG не загрузился для текущего ядра.", "Проверьте linux-headers, dkms и результат: dkms status; dmesg | tail -50.", "Повторная установка обновлённой версии добавит headers/DKMS и попробует собрать модуль заново.", "Если headers или загрузка модулей запрещены провайдером, используйте engine legacy или другой VDS."}

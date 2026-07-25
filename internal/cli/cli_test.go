@@ -116,7 +116,7 @@ func TestPanelURLUsesPersistedHostAndPort(t *testing.T) {
 
 func TestDependenciesIncludeHealthAndModuleDiagnostics(t *testing.T) {
 	cmd := dependenciesCommand(true)
-	for _, want := range []string{"APT::Get::AllowUnauthenticated=false install -y curl", "Acquire::AllowInsecureRepositories=false", "docker-compose-plugin docker-compose-v2 docker-compose", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
+	for _, want := range []string{"APT::Get::AllowUnauthenticated=false install -y curl", "APT::Get::AllowUnauthenticated=false full-upgrade -y", "Acquire::AllowInsecureRepositories=false", "docker-compose-plugin docker-compose-v2 docker-compose", "AMNEZIAWG=kernel-upgrade-failed", "AMNEZIAWG=kernel-headers-unavailable-after-upgrade", "linux-headers-$(uname -r)", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("dependency command lacks %q: %s", want, cmd)
 		}

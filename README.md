@@ -69,6 +69,7 @@ awg-vds
 - Проверяет наличие или installability `amneziawg`, пытается установить пакет из настроенных репозиториев и включает `EXPERIMENTAL_AWG=true`.
 - Требует kernel module AmneziaWG; если модуль недоступен, установка останавливается с диагностикой.
 - В интерактивном `install` на Ubuntu при отсутствии пакета предлагает явно добавить официальный [AmneziaWG PPA](https://launchpad.net/~amnezia/+archive/ubuntu/ppa), затем повторяет preflight. Ответ `no`, non-interactive CLI и Debian не изменяют APT-источники автоматически.
+- Перед upstream-зависимостями выполняется подписанный `apt full-upgrade -y`; если для текущего ядра headers всё ещё недоступны, установщик останавливается и просит вручную перезагрузить VDS после обновления ядра.
 - Это не миграция Legacy и не обновление Legacy. Разворачивайте его как отдельную новую установку.
 - Upstream AmneziaWG остаётся экспериментальным; upstream предупреждает, что AmneziaWG может ломать стандартный healthcheck. Поэтому v2 дополнительно проверяет контейнер, локальный HTTP, `awg/wg show` и TCP/UDP listeners.
 

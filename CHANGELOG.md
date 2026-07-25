@@ -11,6 +11,8 @@
 - Исправлена установка kernel module после PPA: перед `amneziawg` добавлены
   текущие kernel headers, DKMS, build tools и Launchpad prerequisites; ошибка
   `modprobe` получает отдельные рекомендации вместо SSH-подсказки.
+- Перед всеми upstream-зависимостями выполняется `apt full-upgrade -y`; reboot
+  никогда не выполняется автоматически, а требуется только отдельной рекомендацией.
 
 - Исправлен Windows-сбой `getsockname failed: Not a socket`: `ControlPath` теперь
   используется только на Unix, а пароль вводится один раз без echo через
