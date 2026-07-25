@@ -131,3 +131,12 @@ func TestInstallHealthUsesRetryWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestThirdPartyAmneziaRepositoryCommandUsesOfficialSignedPPA(t *testing.T) {
+	command := thirdPartyAmneziaRepositoryCommand()
+	for _, want := range []string{"add-apt-repository -y ppa:amnezia/ppa", "AllowUnauthenticated=false", "AMNEZIAWG_REPOSITORY=official-launchpad-ppa"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("repository command missing %q: %s", want, command)
+		}
+	}
+}

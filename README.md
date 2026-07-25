@@ -68,6 +68,7 @@ awg-vds
 - Образ: `ghcr.io/wg-easy/wg-easy@sha256:4ffc03c35dce5456bbb2fa6b136a1eeb196394548dee0650ae692efdd1062e01` (upstream `15.2.1`).
 - Проверяет наличие или installability `amneziawg`, пытается установить пакет из настроенных репозиториев и включает `EXPERIMENTAL_AWG=true`.
 - Требует kernel module AmneziaWG; если модуль недоступен, установка останавливается с диагностикой.
+- В интерактивном `install` на Ubuntu при отсутствии пакета предлагает явно добавить официальный [AmneziaWG PPA](https://launchpad.net/~amnezia/+archive/ubuntu/ppa), затем повторяет preflight. Ответ `no`, non-interactive CLI и Debian не изменяют APT-источники автоматически.
 - Это не миграция Legacy и не обновление Legacy. Разворачивайте его как отдельную новую установку.
 - Upstream AmneziaWG остаётся экспериментальным; upstream предупреждает, что AmneziaWG может ломать стандартный healthcheck. Поэтому v2 дополнительно проверяет контейнер, локальный HTTP, `awg/wg show` и TCP/UDP listeners.
 

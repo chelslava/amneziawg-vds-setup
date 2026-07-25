@@ -41,6 +41,12 @@ func Run(args []string, out, errOut io.Writer) error {
 }
 
 func runCommand(args []string, out, errOut io.Writer) error {
+	return runCommandWithPrompt(args, out, errOut, nil)
+}
+
+type thirdPartyRepoPrompt func() bool
+
+func runCommandWithPrompt(args []string, out, errOut io.Writer, prompt thirdPartyRepoPrompt) error {
 	if containsSecretFlag(args) {
 		return errors.New("password flags are forbidden; SSH password authentication is interactive only")
 	}
@@ -70,7 +76,7 @@ func runCommand(args []string, out, errOut io.Writer) error {
 	case "doctor":
 		return doctor(ctx, &c, o, out)
 	case "install":
-		return install(ctx, &c, o, out)
+		return installWithPrompt(ctx, &c, o, out, prompt)
 	case "status":
 		return existing(ctx, &c, o, out, "status")
 	case "update":
@@ -145,6 +151,10 @@ func doctor(ctx context.Context, c remoteRunner, o config.Options, out io.Writer
 }
 
 func install(ctx context.Context, c remoteRunner, o config.Options, out io.Writer) error {
+	return installWithPrompt(ctx, c, o, out, nil)
+}
+
+func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, out io.Writer, prompt thirdPartyRepoPrompt) error {
 	const totalSteps = 9
 	installStep(out, 1, totalSteps, "Checking existing installation state")
 	old, found, err := readState(ctx, c)
@@ -181,7 +191,21 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 		return errors.New("requested port is already occupied; inspect doctor output before installing")
 	}
 	if o.Engine == config.Upstream && (strings.Contains(pre, "AMNEZIAWG=unsupported") || strings.Contains(pre, "AMNEZIAWG=repository-unavailable")) {
-		return errors.New("upstream requires the AmneziaWG kernel module; doctor found no supported installed or installable module")
+		if prompt != nil && strings.Contains(pre, "OS=ubuntu ") && prompt() {
+			if result, repoErr := c.Run(ctx, thirdPartyAmneziaRepositoryCommand()); repoErr != nil {
+				ssh.PrintOutput(out, result)
+				return fmt.Errorf("add official AmneziaWG repository: %w", repoErr)
+			}
+			retry, retryErr := c.Run(ctx, preflight.Command(o))
+			ssh.PrintOutput(out, retry)
+			if retryErr != nil {
+				return retryErr
+			}
+			pre = retry
+		}
+		if strings.Contains(pre, "AMNEZIAWG=unsupported") || strings.Contains(pre, "AMNEZIAWG=repository-unavailable") {
+			return errors.New("upstream requires the AmneziaWG kernel module; doctor found no supported installed or installable module")
+		}
 	}
 	installStep(out, 3, totalSteps, "Preparing Docker and AmneziaWG dependencies")
 	if result, err := c.Run(ctx, dependenciesCommand(o.Engine == config.Upstream)); err != nil {
@@ -470,6 +494,10 @@ func dependenciesCommand(upstream bool) string {
 		cmd += fmt.Sprintf("if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then %s; if ! %s amneziawg; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi; if module_error=$(modprobe amneziawg 2>&1); then printf 'AMNEZIAWG=module-loaded\\n'; else printf 'AMNEZIAWG=module-load-failed %%s\\n' \"$module_error\" >&2; exit 1; fi; fi; ", aptUpdate, aptInstall)
 	}
 	return cmd + "printf 'DEPENDENCIES=ok\\n'"
+}
+
+func thirdPartyAmneziaRepositoryCommand() string {
+	return "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; apt-get -o APT::Get::AllowUnauthenticated=false install -y software-properties-common; add-apt-repository -y ppa:amnezia/ppa; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; printf 'AMNEZIAWG_REPOSITORY=official-launchpad-ppa\\n'"
 }
 
 func rotatePasswordCommand(s state.State) string {

@@ -411,7 +411,9 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			fmt.Fprintln(out, tr(selection.language, "cancelled"))
 			continue
 		}
-		if err := runCommand(command, out, errOut); err != nil {
+		if err := runCommandWithPrompt(command, out, errOut, func() bool {
+			return confirm(reader, out, tr(selection.language, "third_party_repo_prompt"))
+		}); err != nil {
 			title, body := errorNotice(selection.language, selection.action, err)
 			if noticeErr := showNoticeTUI(in, out, title, body); noticeErr != nil {
 				return noticeErr
