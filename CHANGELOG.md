@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Ошибка отсутствующего upstream-модуля AmneziaWG теперь показывает отдельные
+  рекомендации: проверить kernel/module через `doctor` или выбрать `legacy` для
+  VDS без поддержки upstream.
+
 - Исправлен Windows-сбой `getsockname failed: Not a socket`: `ControlPath` теперь
   используется только на Unix, а пароль вводится один раз без echo через
   временный askpass-helper, только в памяти текущей операции.

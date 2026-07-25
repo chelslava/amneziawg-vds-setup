@@ -63,6 +63,15 @@ func TestTUIViewContainsControlCenter(t *testing.T) {
 	}
 }
 
+func TestErrorNoticeExplainsMissingUpstreamModule(t *testing.T) {
+	_, notice := errorNotice(langRU, "install", errors.New("upstream requires the AmneziaWG kernel module; doctor found no supported installed or installable module"))
+	for _, want := range []string{"модуль ядра AmneziaWG", "Запустите doctor", "engine legacy", "автоматической миграции"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("missing recommendation %q in %s", want, notice)
+		}
+	}
+}
+
 func TestTUILanguageSelectionPrecedesActionMenu(t *testing.T) {
 	model := tuiModel{}
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})

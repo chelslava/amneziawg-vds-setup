@@ -233,6 +233,12 @@ func errorNotice(lang uiLanguage, action string, err error) (string, string) {
 		} else {
 			recommendation = []string{"A Legacy installation already exists on this server.", "Upstream is a separate scenario and never replaces Legacy automatically.", "Use a fresh VDS for Upstream or retry with engine legacy.", "The existing configuration was not changed."}
 		}
+	} else if strings.Contains(strings.ToLower(detail), "amneziawg kernel module") || strings.Contains(strings.ToLower(detail), "module is neither installed nor available") {
+		if lang == langRU {
+			recommendation = []string{"Upstream требует модуль ядра AmneziaWG; текущая ОС или ядро его не поддерживает либо репозитории недоступны.", "Запустите doctor и проверьте версию ядра, архитектуру и доступность пакета/модуля amneziawg.", "Если провайдер не позволяет загрузить модуль, выберите engine legacy для совместимости с WireSock.", "Legacy и Upstream — разные сценарии; автоматической миграции между ними нет."}
+		} else {
+			recommendation = []string{"Upstream requires the AmneziaWG kernel module; this OS/kernel does not support it or the repositories are unavailable.", "Run doctor and check the kernel version, architecture, and availability of the amneziawg package/module.", "If the provider cannot load the module, choose engine legacy for WireSock compatibility.", "Legacy and Upstream are separate scenarios; automatic migration between them is not supported."}
+		}
 	} else if strings.Contains(strings.ToLower(detail), "ssh command failed") {
 		if lang == langRU {
 			recommendation = []string{"Проверьте адрес VDS, пользователя и порт SSH.", "При password выберите интерактивный ввод OpenSSH; пароль не передаётся в аргументах.", "Для ключа проверьте путь и known_hosts.", "Запустите doctor после исправления доступа."}
