@@ -29,6 +29,7 @@ awg-vds doctor --host HOST [--engine legacy|upstream]
 awg-vds status --host HOST [connection flags]
 awg-vds update --host HOST [connection flags]
 awg-vds backup --host HOST [connection flags]
+awg-vds rotate-password --host HOST [connection flags]
 ```
 
 `status`, `update` и `backup` загружают настройки движка, портов, домена и путей из `/opt/awg-vds/install-state.json`. Для SSH всё равно нужны адрес сервера и параметры подключения. `update` сначала создаёт backup и только потом заменяет контейнер. Повторный `install` того же движка выполняет безопасное reconcile; смена движка автоматически запрещена.
@@ -65,6 +66,8 @@ Legacy и AmneziaWG 2.0 — разные сценарии. v2 не генери�
 Серверное состояние хранится в `/opt/awg-vds/install-state.json` и содержит engine, pinned image, порты, домен, TLS-режим, даты, пути и метаданные последнего backup (путь и SHA-256). SSH-пароли, приватные ключи, `PASSWORD_HASH` и клиентские конфигурации туда не записываются.
 
 При установке панель получает случайный bcrypt-пароль: исходный пароль хранится только на VDS в /opt/awg-vds/panel-password с 0600 и не попадает в state, логи или вывод CLI. Получайте его осознанно отдельной SSH-командой ssh root@HOST sudo cat /opt/awg-vds/panel-password и не сохраняйте в публичных местах.
+
+Для плановой смены или восстановления доступа используйте `rotate-password`. Команда сначала создаёт backup, атомарно меняет защищённый файл и `PASSWORD_HASH`, перезапускает только контейнер панели, проверяет health и удаляет временную копию старого секрета только после успеха. Новый пароль не выводится CLI: получите его отдельной интерактивной командой `ssh root@HOST sudo cat /opt/awg-vds/panel-password`. При сбое health выполняется rollback; plaintext не попадает в state, логи или GitHub Actions.
 
 Backup создаётся на сервере в `/opt/awg-vds/backups/` с UTC-датой в имени, SHA-256 и правами `0600`. Snapshot включает VPN-конфигурацию, env-файлы, state, Caddy-данные и защищённый файл пароля панели, поэтому не копируйте его в публичное место. `update` не продолжает обновление, если backup не создан; при последующем health failure snapshot используется для rollback.
 

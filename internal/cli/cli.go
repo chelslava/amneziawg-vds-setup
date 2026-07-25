@@ -64,8 +64,10 @@ func Run(args []string, out, errOut io.Writer) error {
 		return existing(ctx, c, o, out, "update")
 	case "backup":
 		return existing(ctx, c, o, out, "backup")
+	case "rotate-password":
+		return existing(ctx, c, o, out, "rotate-password")
 	default:
-		return fmt.Errorf("unknown command %q (use install, status, update, backup, or doctor)", o.Command)
+		return fmt.Errorf("unknown command %q (use install, status, update, backup, rotate-password, or doctor)", o.Command)
 	}
 }
 
@@ -267,6 +269,41 @@ func existing(ctx context.Context, c remoteRunner, o config.Options, out io.Writ
 		fmt.Fprintln(out, "Update completed; the existing configuration was preserved.")
 		printSummary(out, s)
 		return nil
+	case "rotate-password":
+		result, err := c.Run(ctx, backup.Command(s))
+		ssh.PrintOutput(out, result)
+		if err != nil {
+			return err
+		}
+		path, checksum, err := backup.ParseResult(result)
+		if err != nil {
+			return err
+		}
+		s.LastBackupPath, s.LastBackupSHA256 = path, checksum
+		if err := writeState(ctx, c, s); err != nil {
+			return err
+		}
+		result, err = c.Run(ctx, rotatePasswordCommand(s))
+		ssh.PrintOutput(out, result)
+		if err != nil {
+			return fmt.Errorf("credential rotation failed; previous credential was restored: %w", err)
+		}
+		if result, err = c.Run(ctx, health.Command(s)); err != nil {
+			ssh.PrintOutput(out, result)
+			rollbackResult, rollbackErr := c.Run(ctx, rollbackPasswordCommand(s))
+			ssh.PrintOutput(out, rollbackResult)
+			if rollbackErr != nil {
+				return fmt.Errorf("credential health check failed: %v; credential rollback failed: %w", err, rollbackErr)
+			}
+			return fmt.Errorf("credential health check failed; previous credential restored: %w", err)
+		}
+		ssh.PrintOutput(out, result)
+		if _, err := c.Run(ctx, cleanupPasswordRotationCommand()); err != nil {
+			return fmt.Errorf("credential rotation succeeded but cleanup failed: %w", err)
+		}
+		fmt.Fprintln(out, "Panel credential rotated successfully.")
+		fmt.Fprintln(out, "Retrieve it interactively from /opt/awg-vds/panel-password; it is never printed by awg-vds.")
+		return nil
 	}
 	return fmt.Errorf("unknown action %s", action)
 }
@@ -364,6 +401,27 @@ func dependenciesCommand(upstream bool) string {
 	}
 	return cmd + "printf 'DEPENDENCIES=ok\\n'"
 }
+
+func rotatePasswordCommand(s state.State) string {
+	envName := "upstream.env"
+	if s.Engine == config.Legacy {
+		envName = "legacy.env"
+	}
+	envPath := "/opt/awg-vds/" + envName
+	return fmt.Sprintf("set -eu; dir=/opt/awg-vds; env=%s; oldenv=$dir/.panel-rotation.env; oldpass=$dir/.panel-rotation.password; cp \"$env\" \"$oldenv\"; cp \"$dir/panel-password\" \"$oldpass\"; rollback(){ cp \"$oldenv\" \"$env\"; cp \"$oldpass\" \"$dir/panel-password\"; chmod 600 \"$env\" \"$dir/panel-password\"; docker restart %s >/dev/null 2>&1 || true; }; trap rollback ERR; new=$(openssl rand -hex 24); hash=$(printf '%%s\\n' \"$new\" | htpasswd -niBC 12 '' | cut -d: -f2-); awk -v h=\"$hash\" 'BEGIN{done=0} /^PASSWORD_HASH=/{print \"PASSWORD_HASH=\" h; done=1; next} {print} END{if(!done) exit 1}' \"$env\" >\"$env.tmp\"; printf '%%s\\n' \"$new\" >\"$dir/panel-password.tmp\"; chmod 600 \"$env.tmp\" \"$dir/panel-password.tmp\"; mv \"$env.tmp\" \"$env\"; mv \"$dir/panel-password.tmp\" \"$dir/panel-password\"; docker restart %s >/dev/null; trap - ERR; printf 'ROTATION=prepared\\n'", shellQuote(envPath), shellQuote(s.Container), shellQuote(s.Container))
+}
+
+func rollbackPasswordCommand(s state.State) string {
+	envName := "upstream.env"
+	if s.Engine == config.Legacy {
+		envName = "legacy.env"
+	}
+	return fmt.Sprintf("set -eu; cp /opt/awg-vds/.panel-rotation.env /opt/awg-vds/%s; cp /opt/awg-vds/.panel-rotation.password /opt/awg-vds/panel-password; chmod 600 /opt/awg-vds/%s /opt/awg-vds/panel-password; docker restart %s >/dev/null; printf 'ROTATION=rolled-back\\n'", envName, envName, shellQuote(s.Container))
+}
+
+func cleanupPasswordRotationCommand() string {
+	return "set -eu; rm -f /opt/awg-vds/.panel-rotation.env /opt/awg-vds/.panel-rotation.password; printf 'ROTATION=cleaned\\n'"
+}
 func envCommand(o config.Options, s state.State) string {
 	name := "upstream.env"
 	if s.Engine == config.Legacy {
@@ -440,7 +498,7 @@ func externalPanelStatus(s state.State) string {
 }
 func usage(out io.Writer) {
 	fmt.Fprintln(out, "awg-vds v2.0.0 — cross-platform AmneziaWG VDS installer")
-	fmt.Fprintln(out, "Commands: install, status, update, backup, doctor")
+	fmt.Fprintln(out, "Commands: install, status, update, backup, rotate-password, doctor")
 	fmt.Fprintln(out, "Common flags: --host HOST --ssh-port 22 --user root --identity-file PATH --known-hosts PATH")
 	fmt.Fprintln(out, "Install flags: --engine legacy|upstream --vpn-port 1234 --web-port 51821 --domain NAME --tls --restrict-panel-ip IP")
 }

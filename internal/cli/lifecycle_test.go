@@ -173,3 +173,61 @@ func TestSameEngineInstallReconcilesExpectedBusyPort(t *testing.T) {
 		t.Fatalf("reconcile summary is incomplete: %s", out.String())
 	}
 }
+
+func TestRotatePasswordBacksUpAndCleansOnlyAfterHealth(t *testing.T) {
+	s := state.State{Version: 1, Engine: config.Legacy, Image: config.LegacyImage, Container: "awg-vds-legacy", VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
+	runner := &matcherRunner{match: func(command string) (string, error) {
+		switch {
+		case strings.Contains(command, "if test -f /opt/awg-vds/install-state.json"):
+			return encodedStatePayload(t, s), nil
+		case strings.Contains(command, "BACKUP_PATH"):
+			return "BACKUP_PATH=/opt/awg-vds/backups/panel-rotation.tar.gz\nBACKUP_SHA256=abc123\n", nil
+		case strings.Contains(command, "ROTATION=prepared"):
+			return "ROTATION=prepared\n", nil
+		case strings.Contains(command, "HEALTH=ok"):
+			return "HEALTH=ok\n", nil
+		case strings.Contains(command, "ROTATION=cleaned"):
+			return "ROTATION=cleaned\n", nil
+		default:
+			return "", nil
+		}
+	}}
+	var out strings.Builder
+	if err := existing(context.Background(), runner, config.Options{}, &out, "rotate-password"); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.commands, "\n")
+	if !strings.Contains(joined, "BACKUP_PATH") || !strings.Contains(joined, "docker restart 'awg-vds-legacy'") || !strings.Contains(joined, "rm -f /opt/awg-vds/.panel-rotation") {
+		t.Fatalf("rotation lifecycle is incomplete: %s", joined)
+	}
+	if strings.Contains(out.String(), "PASSWORD_HASH=") || strings.Contains(out.String(), "ROTATION_PASSWORD=") {
+		t.Fatalf("rotation output exposed secret material: %s", out.String())
+	}
+}
+
+func TestRotatePasswordRollsBackAfterHealthFailure(t *testing.T) {
+	s := state.State{Version: 1, Engine: config.Legacy, Image: config.LegacyImage, Container: "awg-vds-legacy", VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
+	runner := &matcherRunner{match: func(command string) (string, error) {
+		switch {
+		case strings.Contains(command, "if test -f /opt/awg-vds/install-state.json"):
+			return encodedStatePayload(t, s), nil
+		case strings.Contains(command, "BACKUP_PATH"):
+			return "BACKUP_PATH=/opt/awg-vds/backups/panel-rotation.tar.gz\nBACKUP_SHA256=abc123\n", nil
+		case strings.Contains(command, "ROTATION=prepared"):
+			return "ROTATION=prepared\n", nil
+		case strings.Contains(command, "HEALTH=ok"):
+			return "", errors.New("panel unavailable")
+		case strings.Contains(command, "ROTATION=rolled-back"):
+			return "ROTATION=rolled-back\n", nil
+		default:
+			return "", nil
+		}
+	}}
+	if err := existing(context.Background(), runner, config.Options{}, &strings.Builder{}, "rotate-password"); err == nil || !strings.Contains(err.Error(), "previous credential restored") {
+		t.Fatalf("expected health rollback, got %v", err)
+	}
+	joined := strings.Join(runner.commands, "\n")
+	if !strings.Contains(joined, "ROTATION=rolled-back") || strings.Contains(joined, "ROTATION=cleaned") {
+		t.Fatalf("rollback ordering is unsafe: %s", joined)
+	}
+}
