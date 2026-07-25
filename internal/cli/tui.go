@@ -516,6 +516,13 @@ func runOperationTUI(in io.Reader, out io.Writer, args []string, lang uiLanguage
 	return final.(operationModel).err
 }
 
+func panelPasswordNotice(lang uiLanguage, password string) string {
+	if lang == langRU {
+		return fmt.Sprintf("\n╭─ Доступ к панели ──────────────────────────╮\n│ Пароль панели (показывается только здесь): │\n│ %s                                       │\n╰───────────────────────────────────────────╯\nСохраните его в менеджере паролей; awg-vds больше нигде его не выводит.", password)
+	}
+	return fmt.Sprintf("\n╭─ Panel access ─────────────────────────────╮\n│ Panel password (shown only here):           │\n│ %s                                       │\n╰───────────────────────────────────────────╯\nSave it in a password manager; awg-vds never prints it elsewhere.", password)
+}
+
 var errTUIBack = errors.New("interactive form cancelled")
 
 type dropdownModel struct {
@@ -1058,6 +1065,14 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 		}
 		if operationErr == nil {
 			fmt.Fprintln(out, tr(selection.language, "operation_completed"))
+			if command[0] == "install" {
+				panelPassword, passwordErr := readPanelPasswordTUI(context.Background(), command, password, errOut)
+				if passwordErr != nil {
+					fmt.Fprintln(out, tr(selection.language, "panel_password_unavailable"))
+				} else {
+					fmt.Fprintln(out, panelPasswordNotice(selection.language, panelPassword))
+				}
+			}
 			fmt.Fprintln(out, tr(selection.language, "return_menu"))
 		}
 	}

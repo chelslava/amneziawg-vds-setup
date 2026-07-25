@@ -284,6 +284,41 @@ func supportedThirdPartyOS(preflightOutput string) bool {
 	return false
 }
 
+func readPanelPasswordTUI(ctx context.Context, args []string, password string, errOut io.Writer) (string, error) {
+	o, fs, err := parse(args)
+	if err != nil {
+		return "", err
+	}
+	if fs != nil && fs.NArg() > 0 {
+		return "", fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if err := o.ValidateConnection(); err != nil {
+		return "", err
+	}
+	c := ssh.Client{Options: o, Stderr: io.Discard}
+	if errOut != nil {
+		c.Stderr = errOut
+	}
+	if password != "" {
+		c.SetPassword(password)
+	}
+	defer c.ForgetPassword()
+	cleanup, err := c.EnableConnectionReuse()
+	if err != nil {
+		return "", fmt.Errorf("prepare SSH connection reuse: %w", err)
+	}
+	defer cleanup()
+	result, err := c.Run(ctx, "umask 077; test -s /opt/awg-vds/panel-password; cat /opt/awg-vds/panel-password")
+	if err != nil {
+		return "", err
+	}
+	result = strings.TrimSpace(result)
+	if result == "" || strings.ContainsAny(result, "\\r\\n") {
+		return "", errors.New("panel password file is empty or malformed")
+	}
+	return result, nil
+}
+
 func healthRetryCommand(s state.State) string {
 	check := health.Command(s)
 	return fmt.Sprintf("set -eu; attempt=1; while test $attempt -le 6; do if %s; then exit 0; fi; sleep 5; attempt=$((attempt+1)); done; exit 1", check)

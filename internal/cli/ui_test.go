@@ -202,6 +202,13 @@ func TestOperationSummaryContainsSafeReviewData(t *testing.T) {
 	}
 }
 
+func TestPanelPasswordNoticeIsExplicitlyInteractiveOnly(t *testing.T) {
+	notice := panelPasswordNotice(langRU, "test-panel-password")
+	if !strings.Contains(notice, "test-panel-password") || !strings.Contains(notice, "только здесь") {
+		t.Fatalf("interactive panel password notice is incomplete: %s", notice)
+	}
+}
+
 func TestOperationRecoveryCommandsPreserveConnection(t *testing.T) {
 	args := []string{"install", "--host", "vpn.example", "--user", "root", "--engine", "upstream"}
 	doctor := commandAsDoctor(args)

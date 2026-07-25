@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- После успешного интерактивного `install` пароль панели показывается только на
+  финальном TUI-экране; operation logs, state и флаговый CLI по-прежнему его не
+  содержат.
 - Расширена серверная поддержка на Fedora, RHEL/CentOS, Rocky Linux, AlmaLinux
   и Oracle Linux: добавлены dnf/DKMS-зависимости, диагностика репозиториев и
   firewalld. Для upstream подключение официального AmneziaWG COPR требует
