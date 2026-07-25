@@ -4,7 +4,7 @@
 
 ## Установка бинарника
 
-Скачайте архив для своей платформы из [GitHub Release v2.2.1](https://github.com/chelslava/amneziawg-vds-setup/releases/tag/v2.2.1), проверьте `SHA256SUMS` и добавьте `awg-vds` в `PATH`.
+Скачайте архив для своей платформы из [GitHub Releases](https://github.com/chelslava/amneziawg-vds-setup/releases), проверьте `SHA256SUMS` и добавьте `awg-vds` в `PATH`.
 
 Для сборки из исходников нужен Go 1.25+:
 
@@ -56,6 +56,30 @@ awg-vds
 
 ## Движки
 
+### Поддерживаемые серверные системы
+
+Установщик v2 поддерживает Ubuntu, Debian, Fedora, RHEL, CentOS, Rocky Linux,
+AlmaLinux и Oracle Linux (`ol`). Для всех вариантов требуется Linux amd64;
+Legacy дополнительно сохраняет ограничение amd64 для совместимости с WireSock.
+Клиентский бинарник при этом остаётся доступным на Windows, Linux и macOS.
+
+Для Ubuntu/Debian используются подписанные APT-репозитории. Для Fedora/RHEL-
+подобных систем используются `dnf`, EPEL при необходимости и Docker Compose.
+При upstream без установленного модуля установщик только после явного согласия
+может подключить официальный AmneziaWG COPR:
+
+```text
+dnf copr enable amneziavpn/amneziawg
+dnf install amneziawg-dkms amneziawg-tools
+```
+
+COPR является сторонним источником пакетов: `doctor` показывает его отсутствие,
+а интерактивный `install` предлагает подключение. Non-interactive режим не
+меняет репозитории автоматически. Нужны доступные `kernel-devel`/`kernel-headers`
+для запущенного ядра; после обновления ядра перезагрузка выполняется оператором,
+не установщиком. Если провайдер использует собственное ядро без headers, выберите
+Legacy или другой VDS.
+
 ### `legacy` — стабильный сценарий v1
 
 - Образ: `ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f` (Legacy `0.2.15`, amd64).
@@ -78,7 +102,7 @@ Legacy и AmneziaWG 2.0 — разные сценарии. v2 не генери�
 
 ## Doctor и проверки
 
-`doctor` проверяет SSH, Ubuntu/Debian, kernel/архитектуру, свободное место и память, Docker/Compose, занятость TCP/UDP портов, firewall, DNS для домена и поддержку AmneziaWG для upstream. После установки выполняются проверки контейнера, локальной панели, UDP VPN-порта, TCP-панели и `awg show`/`wg show`.
+`doctor` проверяет SSH, дистрибутив и версию, kernel/архитектуру, свободное место и память, Docker/Compose, занятость TCP/UDP портов, UFW/firewalld/nftables, DNS для домена и поддержку AmneziaWG для upstream. После установки выполняются проверки контейнера, локальной панели, UDP VPN-порта, TCP-панели и `awg show`/`wg show`.
 
 Для `install` стандартный timeout SSH — 15 минут, чтобы `apt full-upgrade` и DKMS успевали завершиться. Для особенно медленного VDS можно указать, например, `--timeout 1800`; автоматическая перезагрузка сервера не выполняется.
 
@@ -101,7 +125,7 @@ Backup создаётся на сервере в `/opt/awg-vds/backups/` с UTC-
 - Не используйте `--password`, `--ssh-password` и другие секретные аргументы — CLI их отклоняет.
 - Не передавайте `PASSWORD_HASH`, приватные ключи или клиентские `.conf` через логи.
 - Образы v2 используют immutable digest; обновление происходит только для явно закреплённого image reference в state. Legacy v1 PowerShell сохраняет отдельный исторический `latest` контракт.
-- APT используется только через системные подписанные метаданные Ubuntu/Debian: v2 передаёт `AllowInsecureRepositories=false` и `AllowUnauthenticated=false`, поэтому unsigned/unauthenticated source останавливает установку. Обновление digest или action SHA требует сверки upstream release, локального `go test`/`go vet` и CI run; исходные v1 pins не переносите в v2 автоматически.
+- APT используется только через системные подписанные метаданные Ubuntu/Debian: v2 передаёт `AllowInsecureRepositories=false` и `AllowUnauthenticated=false`, поэтому unsigned/unauthenticated source останавливает установку. Для Fedora/RHEL COPR подключается только после явного подтверждения пользователя. Обновление digest или action SHA требует сверки upstream release, локального `go test`/`go vet` и CI run; исходные v1 pins не переносите в v2 автоматически.
 - Передавайте ключ через `--identity-file`; после настройки отключите SSH password login и root password login.
 - Проверьте ownership VDS до запуска. TLS требует, чтобы DNS уже указывал на VDS.
 

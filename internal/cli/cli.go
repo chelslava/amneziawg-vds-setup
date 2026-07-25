@@ -158,7 +158,7 @@ func doctor(ctx context.Context, c remoteRunner, o config.Options, out io.Writer
 		return errors.New("upstream engine is unsupported: AmneziaWG module is neither installed nor available from configured repositories")
 	}
 	if strings.Contains(result, "AMNEZIAWG=repository-unavailable") {
-		return errors.New("upstream preflight could not refresh APT metadata; check repository connectivity and signatures")
+		return errors.New("upstream preflight could not refresh package metadata; check repository connectivity, signatures, and supported distro repositories")
 	}
 	return nil
 }
@@ -204,7 +204,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 		return errors.New("requested port is already occupied; inspect doctor output before installing")
 	}
 	if o.Engine == config.Upstream && (strings.Contains(pre, "AMNEZIAWG=unsupported") || strings.Contains(pre, "AMNEZIAWG=repository-unavailable")) {
-		if prompt != nil && strings.Contains(pre, "OS=ubuntu ") && prompt() {
+		if prompt != nil && supportedThirdPartyOS(pre) && prompt() {
 			if result, repoErr := c.Run(ctx, thirdPartyAmneziaRepositoryCommand()); repoErr != nil {
 				ssh.PrintOutput(out, result)
 				return fmt.Errorf("add official AmneziaWG repository: %w", repoErr)
@@ -273,6 +273,15 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 	installDone(out, "Saving installation state")
 	printSummary(out, s)
 	return nil
+}
+
+func supportedThirdPartyOS(preflightOutput string) bool {
+	for _, id := range []string{"ubuntu", "fedora", "rhel", "centos", "rocky", "almalinux", "ol"} {
+		if strings.Contains(preflightOutput, "OS="+id+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 func healthRetryCommand(s state.State) string {
@@ -500,22 +509,21 @@ func configurationDrift(s state.State, o config.Options) []string {
 }
 
 func dependenciesCommand(upstream bool) string {
-	aptUpdate := "apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update"
-	aptInstall := "apt-get -o APT::Get::AllowUnauthenticated=false install -y"
-	aptUpgrade := "apt-get -o APT::Get::AllowUnauthenticated=false full-upgrade -y"
-	upstreamPrerequisites := ""
+	upstreamDebian := ""
+	upstreamRPM := ""
+	upstreamMarker := ""
 	if upstream {
-		upstreamPrerequisites = "if ! " + aptUpgrade + "; then printf 'AMNEZIAWG=kernel-upgrade-failed\\n' >&2; exit 1; fi; " + aptUpdate + "; if ! apt-cache policy linux-headers-$(uname -r) 2>/dev/null | grep -q 'Candidate: [^()]'; then reboot_required=0; test -e /var/run/reboot-required && reboot_required=1 || true; printf 'AMNEZIAWG=kernel-headers-unavailable-after-upgrade kernel=%s reboot-required=%s\\n' \"$(uname -r)\" \"$reboot_required\" >&2; exit 1; fi; " + aptInstall + " linux-headers-$(uname -r) dkms build-essential;"
+		upstreamDebian = "if ! apt-get -o APT::Get::AllowUnauthenticated=false full-upgrade -y; then printf 'AMNEZIAWG=kernel-upgrade-failed\\n' >&2; exit 1; fi; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; if ! apt-cache policy linux-headers-$(uname -r) 2>/dev/null | grep -q 'Candidate: [^()]'; then reboot_required=0; test -e /var/run/reboot-required && reboot_required=1 || true; printf 'AMNEZIAWG=kernel-headers-unavailable-after-upgrade kernel=%s reboot-required=%s\\n' \"$(uname -r)\" \"$reboot_required\" >&2; exit 1; fi; apt-get -o APT::Get::AllowUnauthenticated=false install -y linux-headers-$(uname -r) dkms build-essential;"
+		upstreamRPM = "if ! dnf upgrade -y --refresh; then printf 'AMNEZIAWG=kernel-upgrade-failed\\n' >&2; exit 1; fi; dnf install -y kernel-devel-$(uname -r) kernel-headers dkms gcc make;"
+		upstreamMarker = "if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then case \"$ID\" in ubuntu|debian) apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; if ! apt-get -o APT::Get::AllowUnauthenticated=false install -y amneziawg; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi ;; fedora|rhel|centos|rocky|almalinux|ol) if ! dnf install -y amneziawg-dkms amneziawg-tools; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi ;; *) printf 'AMNEZIAWG=unsupported\\n' >&2; exit 1 ;; esac; if module_error=$(modprobe amneziawg 2>&1); then printf 'AMNEZIAWG=module-loaded\\n'; else printf 'AMNEZIAWG=module-load-failed %%s\\n' \"$module_error\" >&2; exit 1; fi; fi; "
 	}
-	cmd := fmt.Sprintf("set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; %s; command -v docker >/dev/null 2>&1 || %s ca-certificates apache2-utils openssl curl docker.io; if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then compose_pkg=; for package in docker-compose-plugin docker-compose-v2 docker-compose; do if apt-cache show \"$package\" >/dev/null 2>&1; then compose_pkg=\"$package\"; break; fi; done; test -n \"$compose_pkg\"; %s \"$compose_pkg\"; fi; command -v htpasswd >/dev/null 2>&1 || %s apache2-utils; command -v openssl >/dev/null 2>&1 || %s openssl; command -v curl >/dev/null 2>&1 || %s curl; %s systemctl enable --now docker; ", aptUpdate, aptInstall, aptInstall, aptInstall, aptInstall, aptInstall, upstreamPrerequisites)
-	if upstream {
-		cmd += fmt.Sprintf("if ! test -e /sys/module/amneziawg && ! command -v awg >/dev/null 2>&1; then %s; if ! %s amneziawg; then printf 'AMNEZIAWG=package-install-failed\\n' >&2; exit 1; fi; if module_error=$(modprobe amneziawg 2>&1); then printf 'AMNEZIAWG=module-loaded\\n'; else printf 'AMNEZIAWG=module-load-failed %%s\\n' \"$module_error\" >&2; exit 1; fi; fi; ", aptUpdate, aptInstall)
-	}
-	return cmd + "printf 'DEPENDENCIES=ok\\n'"
+	return "set -eu; . /etc/os-release; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; case \"$ID\" in ubuntu|debian) apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; " +
+		upstreamDebian + " apt-get -o APT::Get::AllowUnauthenticated=false install -y ca-certificates apache2-utils openssl curl; if ! command -v docker >/dev/null 2>&1; then docker_pkg=; for package in docker.io docker-ce-cli docker-cli; do if apt-cache policy \"$package\" 2>/dev/null | grep -q 'Candidate: [^()]'; then docker_pkg=\"$package\"; break; fi; done; test -n \"$docker_pkg\"; apt-get -o APT::Get::AllowUnauthenticated=false install -y \"$docker_pkg\"; fi; if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then compose_pkg=; for package in docker-compose-plugin docker-compose-v2 docker-compose; do if apt-cache show \"$package\" >/dev/null 2>&1; then compose_pkg=\"$package\"; break; fi; done; test -n \"$compose_pkg\"; apt-get -o APT::Get::AllowUnauthenticated=false install -y \"$compose_pkg\"; fi; command -v htpasswd >/dev/null 2>&1 || apt-get -o APT::Get::AllowUnauthenticated=false install -y apache2-utils ;; " +
+		"fedora|rhel|centos|rocky|almalinux|ol) " + upstreamRPM + " dnf install -y ca-certificates httpd-tools openssl curl docker; if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then dnf install -y docker-compose-plugin || dnf install -y docker-compose; fi ;; *) printf 'ERROR=Unsupported OS: %s\\n' \"$ID\" >&2; exit 1 ;; esac; hash -r 2>/dev/null || true; if ! command -v docker >/dev/null 2>&1; then printf 'DOCKER=missing\\n' >&2; exit 1; fi; command -v openssl >/dev/null 2>&1 || exit 1; command -v curl >/dev/null 2>&1 || exit 1; systemctl enable --now docker; " + upstreamMarker + "printf 'DEPENDENCIES=ok\\n'"
 }
 
 func thirdPartyAmneziaRepositoryCommand() string {
-	return "set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; apt-get -o APT::Get::AllowUnauthenticated=false full-upgrade -y; apt-get -o APT::Get::AllowUnauthenticated=false install -y software-properties-common python3-launchpadlib gnupg2; add-apt-repository -y ppa:amnezia/ppa; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; printf 'AMNEZIAWG_REPOSITORY=official-launchpad-ppa\\n'"
+	return "set -eu; . /etc/os-release; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; case \"$ID\" in ubuntu) apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; apt-get -o APT::Get::AllowUnauthenticated=false full-upgrade -y; apt-get -o APT::Get::AllowUnauthenticated=false install -y software-properties-common python3-launchpadlib gnupg2; add-apt-repository -y ppa:amnezia/ppa; apt-get -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; printf 'AMNEZIAWG_REPOSITORY=official-launchpad-ppa\\n' ;; fedora|rhel|centos|rocky|almalinux|ol) dnf install -y epel-release || true; dnf install -y dnf-plugins-core; dnf copr enable -y amneziavpn/amneziawg; dnf makecache; printf 'AMNEZIAWG_REPOSITORY=official-copr\\n' ;; *) printf 'AMNEZIAWG_REPOSITORY=unsupported\\n' >&2; exit 1 ;; esac"
 }
 
 func rotatePasswordCommand(s state.State) string {

@@ -217,14 +217,14 @@ func confirm(in lineInput, out io.Writer, label string) bool {
 func tr(lang uiLanguage, key string) string {
 	if lang == langRU {
 		if value, ok := map[string]string{
-			"third_party_repo_prompt": "Добавить официальный PPA AmneziaWG? Это изменит APT-источники на сервере [no]",
+			"third_party_repo_prompt": "Добавить официальный репозиторий AmneziaWG? Это изменит источники пакетов на сервере [no]",
 			"select_action":           "Выберите действие", "goodbye": "До свидания.", "invalid_menu": "Выберите число от 0 до 7.", "cancelled": "Отменено.", "operation_failed": "Операция завершилась ошибкой:", "operation_completed": "Операция завершена.", "return_menu": "Возврат в главное меню…", "proceed": "Продолжить", "engine": "Движок", "vpn_port": "UDP-порт VPN", "panel_port": "TCP-порт панели", "domain": "Домен (пусто = HTTP по адресу VDS)", "enable_tls": "Включить TLS через Caddy", "panel_restriction": "Ограничение панели по IP (необязательно)", "vds_address": "Адрес VDS", "vds_required": "адрес VDS обязателен", "ssh_user": "Пользователь SSH", "ssh_port": "Порт SSH", "ssh_auth": "Метод SSH-аутентификации", "identity_file": "Файл SSH-ключа", "known_hosts": "Файл known_hosts (пусто = системный)", "password_notice": "Пароль будет запрошен один раз самим awg-vds без отображения символов; он хранится только в памяти и не сохраняется.",
 		}[key]; ok {
 			return value
 		}
 	}
 	return map[string]string{
-		"third_party_repo_prompt": "Add the official AmneziaWG PPA? This changes APT sources on the server [no]",
+		"third_party_repo_prompt": "Add the official AmneziaWG repository? This changes package sources on the server [no]",
 		"select_action":           "Select an action", "goodbye": "Goodbye.", "invalid_menu": "Choose a number from 0 to 7.", "cancelled": "Cancelled.", "operation_failed": "Operation failed:", "operation_completed": "Operation completed.", "return_menu": "Returning to main menu…", "proceed": "Proceed", "engine": "Engine", "vpn_port": "VPN UDP port", "panel_port": "Panel TCP port", "domain": "Domain (empty for host-only HTTP)", "enable_tls": "Enable TLS with Caddy", "panel_restriction": "Optional panel IP restriction", "vds_address": "VDS address", "vds_required": "VDS address is required", "ssh_user": "SSH user", "ssh_port": "SSH port", "ssh_auth": "SSH auth method", "identity_file": "SSH identity file", "known_hosts": "known_hosts file (empty for system default)", "password_notice": "awg-vds will request the SSH password once without echo; it is kept only in memory and never saved.",
 	}[key]
 }

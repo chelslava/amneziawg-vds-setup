@@ -698,9 +698,15 @@ func errorNotice(lang uiLanguage, action string, err error) (string, string) {
 		}
 	} else if strings.Contains(strings.ToLower(detail), "amneziawg kernel module") || strings.Contains(strings.ToLower(detail), "module is neither installed nor available") {
 		if lang == langRU {
-			recommendation = []string{"Upstream требует модуль ядра AmneziaWG; текущая ОС или ядро его не поддерживает либо репозитории недоступны.", "Запустите doctor и проверьте версию ядра, архитектуру и доступность пакета/модуля amneziawg.", "Если провайдер не позволяет загрузить модуль, выберите engine legacy для совместимости с WireSock.", "Legacy и Upstream — разные сценарии; автоматической миграции между ними нет."}
+			recommendation = []string{"Upstream требует модуль ядра AmneziaWG; текущая ОС или ядро его не поддерживает либо репозитории недоступны.", "Запустите doctor и проверьте версию ядра, архитектуру и доступность пакета/модуля amneziawg.", "На Fedora/RHEL-подобных системах повторите установку и разрешите добавить официальный COPR-репозиторий.", "Legacy и Upstream — разные сценарии; автоматической миграции между ними нет. При необходимости выберите engine legacy."}
 		} else {
-			recommendation = []string{"Upstream requires the AmneziaWG kernel module; this OS/kernel does not support it or the repositories are unavailable.", "Run doctor and check the kernel version, architecture, and availability of the amneziawg package/module.", "If the provider cannot load the module, choose engine legacy for WireSock compatibility.", "Legacy and Upstream are separate scenarios; automatic migration between them is not supported."}
+			recommendation = []string{"Upstream requires the AmneziaWG kernel module; this OS/kernel does not support it or the repositories are unavailable.", "Run doctor and check the kernel version, architecture, and availability of the amneziawg package/module.", "On Fedora/RHEL-like systems, retry and allow the official AmneziaWG COPR repository when prompted.", "If the provider cannot load the module, choose engine legacy for WireSock compatibility."}
+		}
+	} else if strings.Contains(strings.ToLower(detail), "docker: command not found") || strings.Contains(strings.ToLower(detail), "docker=missing") {
+		if lang == langRU {
+			recommendation = []string{"Docker Compose установлен, но команда docker недоступна на сервере.", "Запустите doctor и проверьте пакет Docker, PATH и состояние docker.service.", "Для Ubuntu/Debian переустановите docker.io; для Fedora/RHEL-подобных систем проверьте пакет docker и репозитории.", "После исправления повторите install: конфигурация уже сохранена безопасно."}
+		} else {
+			recommendation = []string{"Docker Compose is installed, but the docker command is unavailable on the server.", "Run doctor and check the Docker package, PATH, and docker.service status.", "On Ubuntu/Debian reinstall docker.io; on Fedora/RHEL-like systems check the docker package and repositories.", "After fixing Docker, retry install; the protected configuration is safe to reconcile."}
 		}
 	} else if strings.Contains(strings.ToLower(detail), "kernel-upgrade-failed") {
 		if lang == langRU {

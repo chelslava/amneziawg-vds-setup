@@ -9,19 +9,19 @@ import (
 
 func Command(o config.Options) string {
 	var b strings.Builder
-	b.WriteString("set -eu; . /etc/os-release; printf 'OS=%s %s\\n' \"$ID\" \"$VERSION_ID\"; arch=$(uname -m); printf 'ARCH=%s\\n' \"$arch\"; case \"$ID\" in ubuntu|debian) ;; *) printf 'ERROR=Unsupported OS: %s\\n' \"$ID\" >&2; exit 1;; esac; ")
+	b.WriteString("set -eu; . /etc/os-release; printf 'OS=%s %s\\n' \"$ID\" \"$VERSION_ID\"; arch=$(uname -m); printf 'ARCH=%s\\n' \"$arch\"; case \"$ID\" in ubuntu|debian|fedora|rhel|centos|rocky|almalinux|ol) ;; *) printf 'ERROR=Unsupported OS: %s\\n' \"$ID\" >&2; exit 1;; esac; ")
 	if o.Engine == config.Legacy {
 		b.WriteString("case \"$arch\" in x86_64|amd64) ;; *) printf 'ERROR=Legacy engine supports linux/amd64 only; detected %s\\n' \"$arch\" >&2; exit 1;; esac; ")
 	}
 	b.WriteString("command -v docker >/dev/null || printf 'WARNING=Docker is not installed\\n'; (docker compose version >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1) || printf 'WARNING=Docker Compose is not installed\\n'; ")
 	b.WriteString("df -Pk / | awk 'NR==2 {printf \"DISK_MB=%d\\n\", $4/1024}'; free -m | awk '/^Mem:/ {printf \"MEM_MB=%d\\n\", $7}'; ")
 	fmt.Fprintf(&b, "if ss -ltnH | awk '{print $4}' | grep -Eq '(^|:)%d$'; then printf 'PORT_TCP_%d=busy\\n'; else printf 'PORT_TCP_%d=free\\n'; fi; if ss -lunH | awk '{print $5}' | grep -Eq '(^|:)%d$'; then printf 'PORT_UDP_%d=busy\\n'; else printf 'PORT_UDP_%d=free\\n'; fi; ", o.WebPort, o.WebPort, o.WebPort, o.VPNPort, o.VPNPort, o.VPNPort)
-	b.WriteString("if command -v ufw >/dev/null 2>&1; then ufw status | head -1 | tr ' ' '_' | sed 's/^/FIREWALL=/'; elif command -v nft >/dev/null 2>&1; then printf 'FIREWALL=nftables\\n'; else printf 'FIREWALL=unknown\\n'; fi; ")
+	b.WriteString("if command -v ufw >/dev/null 2>&1; then ufw status | head -1 | tr ' ' '_' | sed 's/^/FIREWALL=/'; elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then printf 'FIREWALL=firewalld_active\\n'; elif command -v nft >/dev/null 2>&1; then printf 'FIREWALL=nftables\\n'; else printf 'FIREWALL=unknown\\n'; fi; ")
 	if o.Domain != "" {
 		fmt.Fprintf(&b, "getent hosts %s >/dev/null 2>&1 && printf 'DNS=ok\\n' || printf 'DNS=unresolved\\n'; ", quote(o.Domain))
 	}
 	if o.Engine == config.Upstream {
-		b.WriteString("if test -e /sys/module/amneziawg || command -v awg >/dev/null 2>&1; then printf 'AMNEZIAWG=present\\n'; elif apt-get update -qq >/dev/null 2>&1; then if apt-cache policy amneziawg 2>/dev/null | grep -q 'Candidate: [^()]'; then printf 'AMNEZIAWG=installable\\n'; else printf 'AMNEZIAWG=unsupported\\n'; fi; else printf 'AMNEZIAWG=repository-unavailable\\n'; fi; ")
+		b.WriteString("if test -e /sys/module/amneziawg || command -v awg >/dev/null 2>&1; then printf 'AMNEZIAWG=present\\n'; elif command -v apt-get >/dev/null 2>&1 && apt-get update -qq >/dev/null 2>&1; then if apt-cache policy amneziawg 2>/dev/null | grep -q 'Candidate: [^()]'; then printf 'AMNEZIAWG=installable\\n'; else printf 'AMNEZIAWG=unsupported\\n'; fi; elif command -v dnf >/dev/null 2>&1 && dnf -q makecache >/dev/null 2>&1; then if dnf list --available amneziawg-dkms 2>/dev/null | grep -q amneziawg-dkms; then printf 'AMNEZIAWG=installable\\n'; else printf 'AMNEZIAWG=unsupported\\n'; fi; else printf 'AMNEZIAWG=repository-unavailable\\n'; fi; ")
 	}
 	b.WriteString("printf 'PREFLIGHT=ok\\n'")
 	return b.String()

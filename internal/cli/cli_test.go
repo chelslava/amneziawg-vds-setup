@@ -133,10 +133,21 @@ func TestPanelURLUsesPersistedHostAndPort(t *testing.T) {
 
 func TestDependenciesIncludeHealthAndModuleDiagnostics(t *testing.T) {
 	cmd := dependenciesCommand(true)
-	for _, want := range []string{"APT::Get::AllowUnauthenticated=false install -y curl", "APT::Get::AllowUnauthenticated=false full-upgrade -y", "Acquire::AllowInsecureRepositories=false", "docker-compose-plugin docker-compose-v2 docker-compose", "AMNEZIAWG=kernel-upgrade-failed", "apt-cache policy linux-headers-$(uname -r)", "Candidate: [^()]", "AMNEZIAWG=kernel-headers-unavailable-after-upgrade", "linux-headers-$(uname -r)", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
+	for _, want := range []string{"apt-cache policy \"$package\"", "docker.io docker-ce-cli docker-cli", "APT::Get::AllowUnauthenticated=false install -y ca-certificates apache2-utils openssl curl", "APT::Get::AllowUnauthenticated=false full-upgrade -y", "Acquire::AllowInsecureRepositories=false", "docker-compose-plugin docker-compose-v2 docker-compose", "AMNEZIAWG=kernel-upgrade-failed", "apt-cache policy linux-headers-$(uname -r)", "Candidate: [^()]", "AMNEZIAWG=kernel-headers-unavailable-after-upgrade", "linux-headers-$(uname -r)", "amneziawg-dkms amneziawg-tools", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("dependency command lacks %q: %s", want, cmd)
 		}
+	}
+}
+
+func TestSupportedThirdPartyOS(t *testing.T) {
+	for _, id := range []string{"ubuntu", "fedora", "rhel", "centos", "rocky", "almalinux", "ol"} {
+		if !supportedThirdPartyOS("OS=" + id + " 9") {
+			t.Fatalf("expected %s to support repository prompt", id)
+		}
+	}
+	if supportedThirdPartyOS("OS=debian 12") {
+		t.Fatal("Debian must not use the third-party repository prompt")
 	}
 }
 
@@ -151,7 +162,7 @@ func TestInstallHealthUsesRetryWindow(t *testing.T) {
 
 func TestThirdPartyAmneziaRepositoryCommandUsesOfficialSignedPPA(t *testing.T) {
 	command := thirdPartyAmneziaRepositoryCommand()
-	for _, want := range []string{"add-apt-repository -y ppa:amnezia/ppa", "AllowUnauthenticated=false", "AMNEZIAWG_REPOSITORY=official-launchpad-ppa"} {
+	for _, want := range []string{"add-apt-repository -y ppa:amnezia/ppa", "dnf copr enable -y amneziavpn/amneziawg", "AllowUnauthenticated=false", "AMNEZIAWG_REPOSITORY=official-launchpad-ppa", "AMNEZIAWG_REPOSITORY=official-copr"} {
 		if !strings.Contains(command, want) {
 			t.Fatalf("repository command missing %q: %s", want, command)
 		}
