@@ -1,67 +1,94 @@
-# Быстрая настройка AmneziaWG на VDS
+# awg-vds v2
 
-Интерактивный PowerShell 7-скрипт для установки последней версии `ghcr.io/yokitoki/awg-easy` на Ubuntu/Debian.
+Кроссплатформенный консольный установщик личного AmneziaWG VPN на VDS. Основной язык — Go; один бинарник работает на Windows, Linux и macOS и использует установленный системный OpenSSH.
 
-## Возможности
+## Установка бинарника
 
-- Запрашивает IP/DNS VDS, SSH-пользователя и пароль через защищённый ввод Windows.
-- Устанавливает Docker, разворачивает AmneziaWG и русскую веб-панель.
-- Использует `host`-сеть, исключая известную проблему Docker-proxy с HTTP-сбросами.
-- Генерирует отдельный bcrypt-пароль панели и проверяет `healthy`, HTTP и интерфейс VPN.
-- При каждой установке генерирует уникальные JC/JMIN/JMAX/S1/S2/H1-H4; awg-easy использует этот набор для сервера и выдаваемых клиентских .conf.
-- Не сохраняет SSH-пароль локально.
+Скачайте архив для своей платформы из [GitHub Release v2.0.0](https://github.com/chelslava/amneziawg-vds-setup/releases/tag/v2.0.0), проверьте `SHA256SUMS` и добавьте `awg-vds` в `PATH`.
 
-### Уникальная сигнатура AmneziaWG
+Для сборки из исходников:
 
-При `Install` скрипт случайно генерирует `JC`, `JMIN`, `JMAX`, `S1`, `S2` и `H1`–`H4` с совместимыми ограничениями. Набор сохраняется на VDS в `/opt/awg-easy/.env` с правами `600` и передаётся awg-easy, поэтому сервер и новые клиентские конфигурации получают одинаковые параметры.
+```powershell
+go test ./...
+$env:GOOS='windows'; $env:GOARCH='amd64'; go build -trimpath -ldflags='-s -w' -o dist/awg-vds-windows-amd64.exe ./cmd/awg-vds
+```
 
-- `Install` — создаёт новый набор параметров.
-- `Reconfigure -Force` — создаёт новый набор и новый пароль панели.
-- `Update` — сохраняет существующий набор.
+Поддерживаемые артефакты: Windows amd64, Linux amd64, macOS amd64 и arm64. OpenSSH (`ssh`) должен быть доступен в `PATH`. Пароль SSH никогда не принимается флагом и вводится только самим OpenSSH в интерактивном режиме; предпочтителен ключ:
 
-После изменения параметров заново скачайте или импортируйте клиентские `.conf` из панели. Эти параметры не являются заменой TLS и не гарантируют обход DPI.
+```text
+awg-vds install --host vpn.example.com --user root --identity-file ~/.ssh/id_ed25519 --engine legacy
+```
 
-## Требования
+## Команды
 
-- PowerShell 7+, Windows OpenSSH Client.
-- VDS с Ubuntu/Debian и доступом `root` по SSH с паролем.
+```text
+awg-vds install --host HOST [--ssh-port 22] [--user root] [--identity-file PATH]
+                 [--engine legacy|upstream] [--vpn-port 1234] [--web-port 51821]
+                 [--domain vpn.example.com --tls] [--restrict-panel-ip IP]
+awg-vds doctor --host HOST [--engine legacy|upstream]
+awg-vds status --host HOST [connection flags]
+awg-vds update --host HOST [connection flags]
+awg-vds backup --host HOST [connection flags]
+```
 
-## Запуск
+`status`, `update` и `backup` загружают настройки движка, портов, домена и путей из `/opt/awg-vds/install-state.json`. Для SSH всё равно нужны адрес сервера и параметры подключения. `update` сначала создаёт backup и только потом заменяет контейнер. Повторный `install` того же движка выполняет безопасное reconcile; смена движка автоматически запрещена.
+
+## Движки
+
+### `legacy` — стабильный сценарий v1
+
+- Образ: `ghcr.io/yokitoki/awg-easy:1.0.1`.
+- `--network host`, общий каталог `/opt/awg-vds/wireguard` монтируется в `/etc/amnezia/amneziawg` и `/etc/wireguard`.
+- Предназначен для Legacy-параметров AmneziaWG и совместимости с WireSock.
+- Поддерживается только Linux amd64; ARM отклоняется до начала установки.
+
+### `upstream` — экспериментальный сценарий
+
+- Образ: `ghcr.io/wg-easy/wg-easy:15.2.1`.
+- Проверяет наличие или installability `amneziawg`, пытается установить пакет из настроенных репозиториев и включает `EXPERIMENTAL_AWG=true`.
+- Требует kernel module AmneziaWG; если модуль недоступен, установка останавливается с диагностикой.
+- Это не миграция Legacy и не обновление Legacy. Разворачивайте его как отдельную новую установку.
+- Upstream AmneziaWG остаётся экспериментальным; upstream предупреждает, что AmneziaWG может ломать стандартный healthcheck. Поэтому v2 дополнительно проверяет контейнер, локальный HTTP, `awg/wg show` и TCP/UDP listeners.
+
+Legacy и AmneziaWG 2.0 — разные сценарии. v2 не генерирует CPS `I1–I5` автоматически и не считает, что все AWG-параметры обязаны совпадать: у `Jc/Jmin/Jmax`, `S1–S4`, `H1–H4` и `I1–I5` разные правила совместимости. CPS можно будет добавить отдельным явно документированным режимом.
+
+## Doctor и проверки
+
+`doctor` проверяет SSH, Ubuntu/Debian, kernel/архитектуру, свободное место и память, Docker/Compose, занятость TCP/UDP портов, firewall, DNS для домена и поддержку AmneziaWG для upstream. После установки выполняются проверки контейнера, локальной панели, UDP VPN-порта, TCP-панели и `awg show`/`wg show`.
+
+## State и backup
+
+Серверное состояние хранится в `/opt/awg-vds/install-state.json` и содержит только engine, pinned image, порты, домен, TLS-режим, даты и пути. SSH-пароли, приватные ключи, `PASSWORD_HASH` и клиентские конфигурации туда не записываются.
+
+Backup создаётся на сервере в `/opt/awg-vds/backups/` с UTC-датой в имени и правами `0600`. Backup содержит конфигурационный каталог VPN, поэтому не копируйте его в публичное место. `update` не продолжает обновление, если backup не создан.
+
+Без `--tls` панель остаётся доступной по HTTP. CLI выводит предупреждение: используйте домен с Caddy TLS и/или ограничение панели по IP через `--restrict-panel-ip`; также откройте только необходимые порты в firewall/security group.
+
+## Безопасность
+
+- Не используйте `--password`, `--ssh-password` и другие секретные аргументы — CLI их отклоняет.
+- Не передавайте `PASSWORD_HASH`, приватные ключи или клиентские `.conf` через логи.
+- Образы не используют `latest`; обновление происходит только для закреплённого тега в state.
+- Передавайте ключ через `--identity-file`; после настройки отключите SSH password login и root password login.
+- Проверьте ownership VDS до запуска. TLS требует, чтобы DNS уже указывал на VDS.
+
+## v1 Legacy
+
+`Install-AmneziaWG.ps1` намеренно не удалён. Это Legacy v1 для существующих пользователей: он требует PowerShell 7, сохраняет прежний сценарий awg-easy/WireSock, TLS/UFW и совместимость с `/opt/awg-easy`. Не смешивайте каталоги v1 и v2 и не запускайте v2 с движком upstream поверх v1-сервера.
+
+Запуск v1:
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\Install-AmneziaWG.ps1
 ```
 
-Или с заранее заданными адресом и портами:
+## Разработка и релиз
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File .\Install-AmneziaWG.ps1 -HostName vpn.example.com -VpnPort 1234 -WebPort 51821
+go test ./...
+go vet ./...
+$env:GOOS='windows'; $env:GOARCH='amd64'; go build -trimpath -o dist/awg-vds-windows-amd64.exe ./cmd/awg-vds
+$env:GOOS='linux'; $env:GOARCH='amd64'; go build -trimpath -o dist/awg-vds-linux-amd64 ./cmd/awg-vds
 ```
 
-После запуска откройте выведенную панель, создайте клиента кнопкой `+` и импортируйте QR-код или `.conf` в AmneziaWG.
-
-## Безопасность
-
-Без домена панель работает по HTTP. Для постоянного доступа настройте TLS reverse proxy. После первоначальной настройки замените пароль `root` на SSH-ключ.
-
-Серверные данные размещаются в `/opt/awg-easy`; не удаляйте эту папку после создания клиентов.
-
-## Инструкция для агента
-
-Агент должен прочитать [`AGENTS.md`](AGENTS.md) до запуска. Кратко: не сохранять SSH-пароль или конфиги клиентов, использовать `host`-сеть, проверить `healthy`/HTTP/UDP после развёртывания и передавать пароль веб-панели только пользователю в защищённом ответе.
-
-Текущий скрипт намеренно интерактивный: он запрашивает SSH-пароль через `Get-Credential`. Для автоматизации агент управляет вводом учётных данных через свой безопасный механизм, а не записывает пароль в файлы или аргументы процесса.
-
-## Режимы и модернизация
-
-- `-Mode Install` устанавливает только новый сервер; существующая установка не перезаписывается.
-- `-Mode Update` обновляет образ, сохраняя `/opt/awg-easy/wireguard` и пароль панели; `-Mode Status` выполняет только проверки.
-- `-Mode Reconfigure -Force` намеренно создаёт новый пароль панели и применяет новые адрес/порты.
-- Используйте `-IdentityFile C:\path\id_ed25519` для SSH-ключа. Без него скрипт запрашивает пароль интерактивно.
-- `-TlsDomain vpn.example.com` запускает Caddy в host network и выдаёт TLS-сертификат. Домен должен уже указывать на VDS. `-ConfigureUfw` открывает нужные порты только при активном UFW; `-RestrictPanelToTls` закрывает прямой WebPort в UFW.
-
-Скрипт сначала проверяет SSH, затем ждёт `healthy` с повторными попытками, проверяет HTTP 200 локально на VDS, `awg show`, TCP WebPort и UDP VPN-port. Внешний HTTP/HTTPS-запрос выполняется с компьютера запуска и предупреждает о проблемах DNS или firewall. Пароль панели исключён из диагностического вывода.
-
-## Релиз
-
-Текущая версия: [v0.2.0 — уникальная AWG-сигнатура](https://github.com/chelslava/amneziawg-vds-setup/releases/tag/v0.2.0).
+Workflow `.github/workflows/release.yml` повторяет тесты, собирает четыре бинарника и публикует `SHA256SUMS` для version tag.
