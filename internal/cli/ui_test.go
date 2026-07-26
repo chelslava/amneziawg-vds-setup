@@ -7,10 +7,17 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
 
+func TestTimestampOperationLogLine(t *testing.T) {
+	got := timestampOperationLogLine(time.Date(2026, 7, 26, 16, 53, 7, 0, time.UTC), "DEPENDENCIES: ok")
+	if got != "[16:53:07] DEPENDENCIES: ok" {
+		t.Fatalf("unexpected timestamped line: %q", got)
+	}
+}
 func TestInteractiveInstallBuildsSafeArguments(t *testing.T) {
 	input := bufio.NewReader(strings.NewReader("vpn.example.com\nroot\n22\nkey\nC:\\Users\\me\\.ssh\\id_ed25519\n\nlegacy\n1234\n51821\nvpn.example.com\nyes\n\n"))
 	args, err := interactiveCommand(input, &strings.Builder{}, "1")
@@ -92,7 +99,7 @@ func TestErrorNoticeExplainsMissingKernelHeaders(t *testing.T) {
 
 func TestErrorNoticeExplainsLongOperationTimeout(t *testing.T) {
 	_, notice := errorNotice(langRU, "install", errors.New("SSH command timed out: context deadline exceeded"))
-	for _, want := range []string{"apt full-upgrade", "15 минут", "--timeout 1800"} {
+	for _, want := range []string{"dnf install", "30 минут", "--timeout 2400"} {
 		if !strings.Contains(notice, want) {
 			t.Fatalf("missing timeout recommendation %q in %s", want, notice)
 		}
@@ -202,10 +209,18 @@ func TestOperationSummaryContainsSafeReviewData(t *testing.T) {
 	}
 }
 
-func TestPanelPasswordNoticeIsExplicitlyInteractiveOnly(t *testing.T) {
-	notice := panelPasswordNotice(langRU, "test-panel-password")
-	if !strings.Contains(notice, "test-panel-password") || !strings.Contains(notice, "только здесь") {
-		t.Fatalf("interactive panel password notice is incomplete: %s", notice)
+func TestInstallAccessNoticeShowsCompleteSaveableDetails(t *testing.T) {
+	notice := installAccessNotice(langRU, []string{"install", "--host", "45.38.249.191", "--user", "root", "--ssh-port", "2222", "--engine", "legacy", "--vpn-port", "1234", "--web-port", "51821"}, "test-panel-password")
+	for _, want := range []string{"Данные доступа", "Панель: http://45.38.249.191:51821", "Логин панели: не требуется", "Пароль панели: test-panel-password", "VPN UDP: 1234", "Engine: legacy", "SSH: ssh -p 2222 root@45.38.249.191", "sudo cat /opt/awg-vds/panel-password", "operation logs"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("install access notice lacks %q: %s", want, notice)
+		}
+	}
+	view := noticeModel{title: "Доступ к панели", body: notice}.View().Content
+	for _, want := range []string{"Доступ к панели", "test-panel-password", "Enter"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("panel access notice view lacks %q: %s", want, view)
+		}
 	}
 }
 

@@ -115,12 +115,34 @@ func (c *Client) Run(ctx context.Context, command string) (string, error) {
 	if timeout <= 0 {
 		timeout = 2 * time.Minute
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	// Non-interactive SSH sessions may receive a restricted PATH from the
 	// server's sshd/PAM configuration. Keep administration binaries discoverable
 	// without relying on a user's shell profile.
 	command = withSystemPath(command)
+	const attempts = 3
+	var lastErr error
+	var lastOut string
+	for attempt := 1; attempt <= attempts; attempt++ {
+		out, err, retry := c.runOnce(ctx, command, timeout)
+		if err == nil {
+			return out, nil
+		}
+		lastOut, lastErr = out, err
+		if !retry || attempt == attempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return lastOut, fmt.Errorf("SSH command timed out: %w", ctx.Err())
+		case <-time.After(time.Duration(attempt) * 2 * time.Second):
+		}
+	}
+	return lastOut, lastErr
+}
+
+func (c *Client) runOnce(ctx context.Context, command string, timeout time.Duration) (string, error, bool) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	args := append(c.args(), command)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Stdin = c.Stdin
@@ -150,18 +172,35 @@ func (c *Client) Run(ctx context.Context, command string) (string, error) {
 			writeRedacted(stderrTarget, stderr.String())
 		}
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("SSH command timed out: %w", ctx.Err())
+			return "", fmt.Errorf("SSH command timed out: %w", ctx.Err()), false
 		}
 		detail := strings.TrimSpace(sanitize(stderr.String()))
 		if detail != "" {
-			return sanitize(stdout.String()), fmt.Errorf("SSH command failed: %w: %s", err, detail)
+			return sanitize(stdout.String()), fmt.Errorf("SSH command failed: %w: %s", err, detail), isPreCommandTransportFailure(detail)
 		}
-		return sanitize(stdout.String()), fmt.Errorf("SSH command failed: %w", err)
+		return sanitize(stdout.String()), fmt.Errorf("SSH command failed: %w", err), false
 	}
 	if !stderrStreamed {
 		writeRedacted(stderrTarget, stderr.String())
 	}
-	return sanitize(stdout.String()), nil
+	return sanitize(stdout.String()), nil, false
+}
+
+func isPreCommandTransportFailure(detail string) bool {
+	detail = strings.ToLower(detail)
+	for _, marker := range []string{
+		"connection timed out during banner exchange",
+		"connection timed out",
+		"connection refused",
+		"connection reset by peer",
+		"connection closed by remote host",
+		"kex_exchange_identification",
+	} {
+		if strings.Contains(detail, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func withSystemPath(command string) string {

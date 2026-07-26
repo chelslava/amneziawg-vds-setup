@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/chelslava/amneziawg-vds-setup/v2/internal/config"
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/ssh"
 )
 
@@ -248,7 +249,7 @@ func operationSummary(args []string, lang uiLanguage) []string {
 	timeout := get("--timeout", "120")
 	if _, explicit := values["--timeout"]; !explicit {
 		if args[0] == "install" {
-			timeout = "900"
+			timeout = "1800"
 		}
 	}
 	risk := ""
@@ -312,7 +313,7 @@ func (m operationModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if value.text != "" {
 			for _, line := range strings.Split(strings.ReplaceAll(value.text, "\r\n", "\n"), "\n") {
 				if strings.TrimSpace(line) != "" {
-					m.lines = append(m.lines, ssh.Redact(line))
+					m.lines = append(m.lines, timestampOperationLogLine(time.Now(), ssh.Redact(line)))
 				}
 			}
 			if len(m.lines) > 500 {
@@ -446,6 +447,9 @@ func formatOperationLog(line string) string {
 	return line
 }
 
+func timestampOperationLogLine(now time.Time, line string) string {
+	return "[" + now.Format("15:04:05") + "] " + line
+}
 func saveOperationLog(lines []string) string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -516,11 +520,39 @@ func runOperationTUI(in io.Reader, out io.Writer, args []string, lang uiLanguage
 	return final.(operationModel).err
 }
 
+func installAccessNotice(lang uiLanguage, args []string, password string) string {
+	o, _, err := parse(args)
+	if err != nil {
+		return panelPasswordNotice(lang, password)
+	}
+	panelURL := installPanelURL(o)
+	sshCommand := fmt.Sprintf("ssh %s@%s", o.User, o.Host)
+	if o.SSHPort != 22 {
+		sshCommand = fmt.Sprintf("ssh -p %d %s@%s", o.SSHPort, o.User, o.Host)
+	}
+	readPasswordCommand := sshCommand + " sudo cat /opt/awg-vds/panel-password"
+	if lang == langRU {
+		return fmt.Sprintf("Данные доступа к установленному стенду:\n\nПанель: %s\nЛогин панели: не требуется\nПароль панели: %s\nVPN UDP: %d\nEngine: %s\nSSH: %s\nПароль панели на сервере: /opt/awg-vds/panel-password\nПовторно прочитать: %s\n\nСохраните эти данные в менеджере паролей. awg-vds не пишет пароль панели в operation logs, state или флаговый CLI-вывод.", panelURL, password, o.VPNPort, o.Engine, sshCommand, readPasswordCommand)
+	}
+	return fmt.Sprintf("Installed access details:\n\nPanel: %s\nPanel login: not required\nPanel password: %s\nVPN UDP: %d\nEngine: %s\nSSH: %s\nPanel password file: /opt/awg-vds/panel-password\nRead again: %s\n\nSave these details in a password manager. awg-vds does not write the panel password to operation logs, state, or flag-mode CLI output.", panelURL, password, o.VPNPort, o.Engine, sshCommand, readPasswordCommand)
+}
+
+func installPanelURL(o config.Options) string {
+	if o.TLS && o.Domain != "" {
+		return "https://" + o.Domain
+	}
+	host := o.Domain
+	if host == "" {
+		host = o.Host
+	}
+	return fmt.Sprintf("http://%s:%d", host, o.WebPort)
+}
+
 func panelPasswordNotice(lang uiLanguage, password string) string {
 	if lang == langRU {
-		return fmt.Sprintf("\n╭─ Доступ к панели ──────────────────────────╮\n│ Пароль панели (показывается только здесь): │\n│ %s                                       │\n╰───────────────────────────────────────────╯\nСохраните его в менеджере паролей; awg-vds больше нигде его не выводит.", password)
+		return fmt.Sprintf("Пароль панели (показывается только здесь):\n\n%s\n\nСохраните его в менеджере паролей; awg-vds больше нигде его не выводит.", password)
 	}
-	return fmt.Sprintf("\n╭─ Panel access ─────────────────────────────╮\n│ Panel password (shown only here):           │\n│ %s                                       │\n╰───────────────────────────────────────────╯\nSave it in a password manager; awg-vds never prints it elsewhere.", password)
+	return fmt.Sprintf("Panel password (shown only here):\n\n%s\n\nSave it in a password manager; awg-vds never prints it elsewhere.", password)
 }
 
 var errTUIBack = errors.New("interactive form cancelled")
@@ -741,9 +773,9 @@ func errorNotice(lang uiLanguage, action string, err error) (string, string) {
 		}
 	} else if strings.Contains(strings.ToLower(detail), "ssh command timed out") || strings.Contains(strings.ToLower(detail), "context deadline exceeded") {
 		if lang == langRU {
-			recommendation = []string{"Долгая операция на сервере превысила SSH timeout; часто это apt full-upgrade или сборка DKMS.", "Повторите установку с актуальным awg-vds: для install установлен timeout 15 минут.", "Если сервер медленный, используйте CLI-флаг --timeout 1800 и проверьте APT-lock после неудачи.", "Перезагрузка автоматически не выполняется; при необходимости используйте doctor после ручной проверки."}
+			recommendation = []string{"Долгая операция на сервере превысила SSH timeout; часто это apt full-upgrade, dnf install или сборка DKMS.", "Повторите установку с актуальным awg-vds: для install установлен timeout 30 минут.", "Если сервер медленный, используйте CLI-флаг --timeout 2400 и проверьте APT-lock после неудачи.", "Перезагрузка автоматически не выполняется; при необходимости используйте doctor после ручной проверки."}
 		} else {
-			recommendation = []string{"A long server operation exceeded the SSH timeout; this is often apt full-upgrade or a DKMS build.", "Retry with the current awg-vds; install now uses a 15-minute timeout.", "For a slow server, use --timeout 1800 and check for an APT lock after failure.", "No automatic reboot is performed; run doctor after manual inspection if needed."}
+			recommendation = []string{"A long server operation exceeded the SSH timeout; this is often apt full-upgrade, dnf install, or a DKMS build.", "Retry with the current awg-vds; install now uses a 30-minute timeout.", "For a slow server, use --timeout 2400 and check for an APT lock after failure.", "No automatic reboot is performed; run doctor after manual inspection if needed."}
 		}
 	} else if strings.Contains(strings.ToLower(detail), "ssh command failed") {
 		if lang == langRU {
@@ -1058,8 +1090,6 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			case "legacy":
 				command = commandAsLegacy(command)
 				continue
-			default:
-				break
 			}
 			break
 		}
@@ -1068,9 +1098,17 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			if command[0] == "install" {
 				panelPassword, passwordErr := readPanelPasswordTUI(context.Background(), command, password, errOut)
 				if passwordErr != nil {
-					fmt.Fprintln(out, tr(selection.language, "panel_password_unavailable"))
+					if noticeErr := showNoticeTUI(in, out, tr(selection.language, "panel_password_unavailable"), tr(selection.language, "panel_password_unavailable")); noticeErr != nil {
+						return noticeErr
+					}
 				} else {
-					fmt.Fprintln(out, panelPasswordNotice(selection.language, panelPassword))
+					title := "Panel access"
+					if selection.language == langRU {
+						title = "Доступ к панели"
+					}
+					if noticeErr := showNoticeTUI(in, out, title, installAccessNotice(selection.language, command, panelPassword)); noticeErr != nil {
+						return noticeErr
+					}
 				}
 			}
 			fmt.Fprintln(out, tr(selection.language, "return_menu"))

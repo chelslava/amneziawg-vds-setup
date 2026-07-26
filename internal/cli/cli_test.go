@@ -25,8 +25,8 @@ func TestInstallUsesLongerDefaultSSHTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if install.TimeoutSecs != 900 {
-		t.Fatalf("install timeout = %d, want 900", install.TimeoutSecs)
+	if install.TimeoutSecs != 1800 {
+		t.Fatalf("install timeout = %d, want 1800", install.TimeoutSecs)
 	}
 	status, _, err := parse([]string{"status", "--host", "vpn.example"})
 	if err != nil {
@@ -133,12 +133,12 @@ func TestPanelURLUsesPersistedHostAndPort(t *testing.T) {
 
 func TestDependenciesIncludeHealthAndModuleDiagnostics(t *testing.T) {
 	cmd := dependenciesCommand(true)
-	for _, want := range []string{"daemon_pkg=", "cli_pkg=", "apt-cache policy docker.io", "apt-cache policy \"$package\"", "docker-ce-cli", "--reinstall \"$daemon_pkg\" \"$cli_pkg\"", "APT::Get::AllowUnauthenticated=false install -y ca-certificates apache2-utils openssl curl", "APT::Get::AllowUnauthenticated=false full-upgrade -y", "Acquire::AllowInsecureRepositories=false", "docker-compose-plugin docker-compose-v2 docker-compose", "AMNEZIAWG=kernel-upgrade-failed", "apt-cache policy linux-headers-$(uname -r)", "Candidate: [^()]", "AMNEZIAWG=kernel-headers-unavailable-after-upgrade", "linux-headers-$(uname -r)", "amneziawg-dkms amneziawg-tools", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
+	for _, want := range []string{"daemon_pkg=", "cli_pkg=", "apt-cache policy docker.io", "apt-cache policy \"$package\"", "docker-ce-cli", "docker_pkgs=\"$daemon_pkg\"", "APT::Get::AllowUnauthenticated=false install -y ca-certificates apache2-utils openssl curl", "APT::Get::AllowUnauthenticated=false full-upgrade -y", "Acquire::AllowInsecureRepositories=false", "docker-compose-plugin docker-compose-v2 docker-compose", "AMNEZIAWG=kernel-upgrade-failed", "apt-cache policy linux-headers-$(uname -r)", "Candidate: [^()]", "AMNEZIAWG=kernel-headers-unavailable-after-upgrade", "linux-headers-$(uname -r)", "amneziawg-dkms amneziawg-tools", "AMNEZIAWG=package-install-failed", "AMNEZIAWG=module-load-failed"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("dependency command lacks %q: %s", want, cmd)
 		}
 	}
-	docker := strings.Index(cmd, "--reinstall \"$daemon_pkg\" \"$cli_pkg\"")
+	docker := strings.Index(cmd, "docker_pkgs=\"$daemon_pkg\"")
 	compose := strings.Index(cmd, "apt-get -o APT::Get::AllowUnauthenticated=false install -y \"$compose_pkg\"")
 	verify := strings.Index(cmd, "command -v docker >/dev/null 2>&1; then printf 'DOCKER=missing")
 	start := strings.Index(cmd, "systemctl enable --now docker")

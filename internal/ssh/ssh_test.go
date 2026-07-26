@@ -9,6 +9,24 @@ import (
 	"github.com/chelslava/amneziawg-vds-setup/v2/internal/config"
 )
 
+func TestPreCommandTransportFailureDetection(t *testing.T) {
+	for _, detail := range []string{
+		"Connection timed out during banner exchange\nConnection to 203.0.113.10 port 22 timed out",
+		"kex_exchange_identification: Connection closed by remote host",
+	} {
+		if !isPreCommandTransportFailure(detail) {
+			t.Fatalf("expected retryable transport failure: %q", detail)
+		}
+	}
+	for _, detail := range []string{
+		"bash: docker: command not found",
+		"E: Package linux-headers has no installation candidate",
+	} {
+		if isPreCommandTransportFailure(detail) {
+			t.Fatalf("unexpected retryable remote failure: %q", detail)
+		}
+	}
+}
 func TestRedactSecrets(t *testing.T) {
 	input := "PASSWORD_HASH=$2y$secret\nPrivateKey=abc\nstatus=healthy\n"
 	output := Redact(input)
