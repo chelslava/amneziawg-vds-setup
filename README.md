@@ -1,4 +1,5 @@
-# awg-vds v2
+# AmneziaWG VDS Setup v2
+<img width="836" height="470" alt="amneziawg-vpn-cli-banner-titled836" src="https://github.com/user-attachments/assets/5bea0d29-dd90-4e60-9221-b45e5abcd35f" />
 
 Кроссплатформенный консольный установщик личного AmneziaWG VPN на VDS. Основной язык — Go; один бинарник работает на Windows, Linux и macOS и использует установленный системный OpenSSH. Интерактивный интерфейс построен на Bubble Tea v2; флаговый режим сохраняется для automation.
 
