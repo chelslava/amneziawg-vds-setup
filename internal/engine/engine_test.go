@@ -54,3 +54,16 @@ func TestUpdateUsesCandidateImageAsRuntimeTarget(t *testing.T) {
 		t.Fatalf("update command ignored candidate state image: %s", cmd)
 	}
 }
+
+func TestInstallCommandsConfigureWireGuardForwarding(t *testing.T) {
+	for _, kind := range []config.Engine{config.Legacy, config.Upstream} {
+		e, _ := Select(kind)
+		s := state.State{Engine: kind, Image: e.Image(), Container: e.Container(), VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", Version: 1}
+		cmd := e.InstallCommand(s)
+		for _, want := range []string{"ip link show wg0", "iptables -C FORWARD -i wg0", "--ctstate RELATED,ESTABLISHED", "iptables -t nat -C POSTROUTING -s 10.8.0.0/24", "-j MASQUERADE"} {
+			if !strings.Contains(cmd, want) {
+				t.Fatalf("%s install command lacks forwarding rule %q: %s", kind, want, cmd)
+			}
+		}
+	}
+}

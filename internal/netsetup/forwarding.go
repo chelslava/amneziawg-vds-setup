@@ -1,0 +1,3 @@
+package netsetup
+
+const WireGuardForwardingCommand = "wan=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}'); test -n \"$wan\" || wan=eth0; for i in 1 2 3 4 5; do ip link show wg0 >/dev/null 2>&1 && break; sleep 1; done; ip link show wg0 >/dev/null 2>&1; iptables -C FORWARD -i wg0 -o \"$wan\" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -o \"$wan\" -j ACCEPT; iptables -C FORWARD -i \"$wan\" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i \"$wan\" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o \"$wan\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o \"$wan\" -j MASQUERADE"
