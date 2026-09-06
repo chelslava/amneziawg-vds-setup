@@ -200,7 +200,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 		return err
 	}
 	installDone(out, "Running preflight checks")
-	if strings.Contains(pre, "PORT_TCP_") && strings.Contains(pre, "=busy") {
+	if (strings.Contains(pre, "PORT_TCP_") || strings.Contains(pre, "PORT_UDP_")) && strings.Contains(pre, "=busy") {
 		return errors.New("requested port is already occupied; inspect doctor output before installing")
 	}
 	if o.Engine == config.Upstream && (strings.Contains(pre, "AMNEZIAWG=unsupported") || strings.Contains(pre, "AMNEZIAWG=repository-unavailable")) {

@@ -15,7 +15,7 @@ func Command(o config.Options) string {
 	}
 	b.WriteString("command -v docker >/dev/null || printf 'WARNING=Docker is not installed\\n'; (docker compose version >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1) || printf 'WARNING=Docker Compose is not installed\\n'; ")
 	b.WriteString("df -Pk / | awk 'NR==2 {printf \"DISK_MB=%d\\n\", $4/1024}'; free -m | awk '/^Mem:/ {printf \"MEM_MB=%d\\n\", $7}'; ")
-	fmt.Fprintf(&b, "if ss -ltnH | awk '{print $4}' | grep -Eq '(^|:)%d$'; then printf 'PORT_TCP_%d=busy\\n'; else printf 'PORT_TCP_%d=free\\n'; fi; if ss -lunH | awk '{print $5}' | grep -Eq '(^|:)%d$'; then printf 'PORT_UDP_%d=busy\\n'; else printf 'PORT_UDP_%d=free\\n'; fi; ", o.WebPort, o.WebPort, o.WebPort, o.VPNPort, o.VPNPort, o.VPNPort)
+	fmt.Fprintf(&b, "if ss -ltnH | awk '{print $4}' | grep -Eq '(^|:)%d$'; then printf 'PORT_TCP_%d=busy\\n'; else printf 'PORT_TCP_%d=free\\n'; fi; if ss -lunH | awk '{print $4}' | grep -Eq '(^|:)%d$'; then printf 'PORT_UDP_%d=busy\\n'; else printf 'PORT_UDP_%d=free\\n'; fi; ", o.WebPort, o.WebPort, o.WebPort, o.VPNPort, o.VPNPort, o.VPNPort)
 	b.WriteString("if command -v ufw >/dev/null 2>&1; then ufw status | head -1 | tr ' ' '_' | sed 's/^/FIREWALL=/'; elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then printf 'FIREWALL=firewalld_active\\n'; elif command -v nft >/dev/null 2>&1; then printf 'FIREWALL=nftables\\n'; else printf 'FIREWALL=unknown\\n'; fi; ")
 	if o.Domain != "" {
 		fmt.Fprintf(&b, "getent hosts %s >/dev/null 2>&1 && printf 'DNS=ok\\n' || printf 'DNS=unresolved\\n'; ", quote(o.Domain))

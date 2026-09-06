@@ -125,6 +125,22 @@ func TestInstallRejectsBusyPortBeforeMutatingEmptyHost(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsBusyUDPPortBeforeMutatingEmptyHost(t *testing.T) {
+	runner := &matcherRunner{match: func(command string) (string, error) {
+		if strings.Contains(command, "if test -f /opt/awg-vds/install-state.json") {
+			return "", nil
+		}
+		return "PORT_UDP_1234=busy\nPREFLIGHT=ok\n", nil
+	}}
+	err := install(context.Background(), runner, config.Options{Engine: config.Legacy, Host: "192.0.2.1", User: "root", SSHPort: 22, VPNPort: 1234, WebPort: 51821}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "already occupied") {
+		t.Fatalf("expected busy-port refusal, got %v", err)
+	}
+	if len(runner.commands) != 2 {
+		t.Fatalf("install mutated host after busy UDP preflight: %#v", runner.commands)
+	}
+}
+
 func TestUpstreamInstallRejectsUnsupportedModule(t *testing.T) {
 	runner := &matcherRunner{match: func(command string) (string, error) {
 		if strings.Contains(command, "if test -f /opt/awg-vds/install-state.json") {
