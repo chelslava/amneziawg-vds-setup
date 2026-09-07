@@ -73,12 +73,67 @@ func TestInstallPromotesStateOnlyAfterHealth(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "post-install health") {
 		t.Fatalf("expected post-install health failure, got %v", err)
 	}
+	cleanedUp := false
 	for _, command := range runner.commands {
+		if strings.Contains(command, "docker rm -f 'awg-vds-legacy' awg-vds-caddy") {
+			cleanedUp = true
+		}
 		if strings.Contains(command, "install-state.json.tmp") {
 			t.Fatal("install promoted state before health succeeded")
 		}
 	}
+	if !cleanedUp {
+		t.Fatal("failed initial install did not clean up partial containers")
+	}
 }
+
+func TestInitialInstallFailureCleansUpAndAllowsRetry(t *testing.T) {
+	attempt := 0
+	runner := &matcherRunner{match: func(command string) (string, error) {
+		switch {
+		case strings.Contains(command, "if test -f /opt/awg-vds/install-state.json"):
+			return "", nil
+		case strings.Contains(command, "attempt=1"):
+			attempt++
+			if attempt == 1 {
+				return "", errors.New("transient health failure")
+			}
+			return "HEALTH=ok\n", nil
+		case strings.Contains(command, "PREFLIGHT=ok"):
+			return "OS=ubuntu 24.04\nARCH=x86_64\nDISK_MB=20000\nMEM_MB=2048\nPORT_TCP_51821=free\nPORT_UDP_1234=free\nFIREWALL=not-configured\nPREFLIGHT=ok\n", nil
+		case strings.Contains(command, "CONFIG=preserved"):
+			return "CONFIG=preserved\n", nil
+		default:
+			return "ok\n", nil
+		}
+	}}
+	var out strings.Builder
+	opts := config.Options{Engine: config.Legacy, Host: "192.0.2.1", User: "root", SSHPort: 22, VPNPort: 1234, WebPort: 51821}
+	// First attempt fails at health check
+	err := install(context.Background(), runner, opts, &out)
+	if err == nil || !strings.Contains(err.Error(), "post-install health check failed") {
+		t.Fatalf("expected health failure on first attempt, got %v", err)
+	}
+
+	// Verify cleanup command was issued
+	cleanedUp := false
+	for _, cmd := range runner.commands {
+		if strings.Contains(cmd, "docker rm -f 'awg-vds-legacy' awg-vds-caddy") {
+			cleanedUp = true
+			break
+		}
+	}
+	if !cleanedUp {
+		t.Fatal("initial install failure did not clean up partial containers")
+	}
+
+	// Second attempt succeeds without port deadlock
+	out.Reset()
+	if err := install(context.Background(), runner, opts, &out); err != nil {
+		t.Fatalf("retry install failed unexpectedly: %v", err)
+	}
+}
+
 
 func TestUpdateRestoresSnapshotAfterHealthFailure(t *testing.T) {
 	s := state.State{Version: 1, Engine: config.Legacy, Image: "ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f", Container: "awg-vds-legacy", VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", InstalledAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}

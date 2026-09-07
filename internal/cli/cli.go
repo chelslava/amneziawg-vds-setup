@@ -240,6 +240,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 	if result, err := c.Run(ctx, e.InstallCommand(s)); err != nil {
 		ssh.PrintOutput(out, result)
 		installFailed(out, "Starting the selected VPN engine", err)
+		cleanupInitialInstall(ctx, c, s)
 		return err
 	}
 	installDone(out, "Starting the selected VPN engine")
@@ -247,6 +248,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 	if result, err := c.Run(ctx, tlsengine.Command(o.TLS, o.Domain, o.WebPort)); err != nil {
 		ssh.PrintOutput(out, result)
 		installFailed(out, "Configuring panel TLS", err)
+		cleanupInitialInstall(ctx, c, s)
 		return err
 	}
 	installDone(out, "Configuring panel TLS")
@@ -254,6 +256,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 	if result, err := c.Run(ctx, firewall.Command(o.VPNPort, o.WebPort, o.TLS, o.RestrictIP)); err != nil {
 		ssh.PrintOutput(out, result)
 		installFailed(out, "Configuring firewall and port access", err)
+		cleanupInitialInstall(ctx, c, s)
 		return err
 	}
 	installDone(out, "Configuring firewall and port access")
@@ -261,6 +264,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 	if result, err := c.Run(ctx, healthRetryCommand(s)); err != nil {
 		ssh.PrintOutput(out, result)
 		installFailed(out, "Checking containers, HTTP panel, and UDP listener", err)
+		cleanupInitialInstall(ctx, c, s)
 		return fmt.Errorf("post-install health check failed: %w", err)
 	}
 	installDone(out, "Checking containers, HTTP panel, and UDP listener")
@@ -268,11 +272,16 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 	installStep(out, 9, totalSteps, "Saving installation state")
 	if err := writeState(ctx, c, s); err != nil {
 		installFailed(out, "Saving installation state", err)
+		cleanupInitialInstall(ctx, c, s)
 		return err
 	}
 	installDone(out, "Saving installation state")
 	printSummary(out, s)
 	return nil
+}
+
+func cleanupInitialInstall(ctx context.Context, c remoteRunner, s state.State) {
+	_, _ = c.Run(ctx, fmt.Sprintf("docker rm -f %s awg-vds-caddy >/dev/null 2>&1 || true", shellQuote(s.Container)))
 }
 
 func supportedThirdPartyOS(preflightOutput string) bool {
