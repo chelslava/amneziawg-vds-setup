@@ -31,9 +31,19 @@ func TestTLSFirewallRestrictsBackendPanel(t *testing.T) {
 
 func TestFirewalldPolicyIsIdempotentAndKeepsTLSBackendPrivate(t *testing.T) {
 	cmd := Command(1234, 51821, true, "198.51.100.7")
-	for _, want := range []string{"firewall-cmd --permanent --add-port=1234/udp", "--add-service=http", "--add-service=https", "--remove-port=51821/tcp", "--reload", "FIREWALL=firewalld"} {
+	for _, want := range []string{
+		"firewall-cmd --permanent --add-port=1234/udp",
+		"--permanent --add-masquerade",
+		"--permanent --zone=trusted --add-interface=wg0",
+		"--add-service=http",
+		"--add-service=https",
+		"--remove-port=51821/tcp",
+		"--reload",
+		"FIREWALL=firewalld",
+	} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("firewalld policy lacks %q: %s", want, cmd)
 		}
 	}
 }
+
