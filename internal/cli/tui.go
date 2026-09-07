@@ -1085,7 +1085,7 @@ func interactiveTUI(in io.Reader, out, errOut io.Writer) error {
 			case "retry":
 				continue
 			case "doctor":
-				command = commandAsDoctor(command)
+				_ = runOperationTUI(in, out, commandAsDoctor(command), selection.language, password)
 				continue
 			case "legacy":
 				command = commandAsLegacy(command)

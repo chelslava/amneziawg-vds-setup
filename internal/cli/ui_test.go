@@ -234,4 +234,9 @@ func TestOperationRecoveryCommandsPreserveConnection(t *testing.T) {
 	if legacy[0] != "install" || strings.Join(legacy, " ") != "install --host vpn.example --user root --engine legacy" {
 		t.Fatalf("legacy recovery unexpected: %v", legacy)
 	}
+	// Verify original args was not mutated by commandAsDoctor
+	if args[0] != "install" {
+		t.Fatalf("commandAsDoctor mutated original args: %v", args)
+	}
 }
+
