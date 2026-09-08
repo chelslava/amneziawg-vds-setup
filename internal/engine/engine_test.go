@@ -69,6 +69,9 @@ func TestInstallCommandsConfigureWireGuardForwarding(t *testing.T) {
 			"--ctstate RELATED,ESTABLISHED",
 			"iptables -t nat -C POSTROUTING -s 10.8.0.0/24",
 			"-j MASQUERADE",
+			"TCPMSS --clamp-mss-to-pmtu",
+			"TCPMSS --set-mss 1240",
+			"txqueuelen 2000",
 		} {
 			if !strings.Contains(cmd, want) {
 				t.Fatalf("%s install command lacks forwarding rule %q: %s", kind, want, cmd)

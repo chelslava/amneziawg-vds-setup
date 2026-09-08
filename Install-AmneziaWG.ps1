@@ -79,25 +79,79 @@ install_docker(){
   apt-get update
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 }
-packages(){ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; apt-get update; install_docker; apt-get install -y apache2-utils openssl curl; systemctl enable --now docker; }
-# Best-effort проверка поддержки WireGuard в ядре хоста (не является фатальной ошибкой):
-# на Debian 10/Buster (ядро 4.19) модуля wireguard может не быть в ядре "из коробки"
-# (в отличие от Debian 11+/Ubuntu 20.04+ с ядром 5.6+, где WireGuard встроен в ядро).
-# Контейнер awg-easy в этом случае сам переключится на userspace-реализацию, но
-# производительность/поведение могут отличаться — пользователь должен это увидеть.
+packages(){ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; apt-get update; install_docker; apt-get install -y apache2-utils openssl curl dnsmasq; systemctl enable --now docker; }
 check_kernel_wg(){ modprobe wireguard 2>/dev/null||true; if ! lsmod 2>/dev/null|grep -q '^wireguard' && [ ! -e /sys/module/wireguard ];then echo 'WARNING=Kernel module "wireguard" not detected; container will fall back to userspace mode. On Debian 10 consider Debian 11+ or install wireguard-dkms.';fi; }
-sysctl_apply(){ printf '%s\n' net.ipv4.ip_forward=1 net.ipv4.conf.all.src_valid_mark=1 >/etc/sysctl.d/99-amneziawg.conf;sysctl --system >/dev/null; }
+sysctl_apply(){ printf '%s\n' net.ipv4.ip_forward=1 net.ipv4.conf.all.src_valid_mark=1 net.core.default_qdisc=fq net.ipv4.tcp_congestion_control=bbr net.core.rmem_max=16777216 net.core.wmem_max=16777216 net.core.rmem_default=1048576 net.core.wmem_default=1048576 net.core.netdev_max_backlog=10000 >/etc/sysctl.d/99-amneziawg.conf;sysctl --system >/dev/null; }
+setup_swap(){ [ -f /swapfile ]&&return 0;free_swap=$(free -m 2>/dev/null|awk '/^Swap:/ {print $2}');if [ "${free_swap:-0}" -eq 0 ];then avail_mb=$(df -m / 2>/dev/null|awk 'NR==2 {print $4}');if [ "${avail_mb:-0}" -ge 2048 ];then fallocate -l 1G /swapfile 2>/dev/null||dd if=/dev/zero of=/swapfile bs=1M count=1024 >/dev/null 2>&1;chmod 600 /swapfile;mkswap /swapfile >/dev/null 2>&1;swapon /swapfile >/dev/null 2>&1;grep -q '/swapfile' /etc/fstab||echo '/swapfile none swap sw 0 0' >>/etc/fstab;fi;fi; }
+setup_dns(){ command -v dnsmasq >/dev/null 2>&1||return 0;cat << 'EOF' > /etc/systemd/system/vpn-dnsmasq.service
+[Unit]
+Description=Caching DNS Server for AmneziaWG Clients
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq -k --user=dnsmasq --group=nogroup --listen-address=10.8.0.1 --bind-interfaces --server=1.1.1.1 --server=8.8.8.8 --server=77.88.8.8 --cache-size=10000 --neg-ttl=60 --no-resolv --pid-file=/run/vpn-dnsmasq.pid
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload;systemctl enable --now vpn-dnsmasq.service >/dev/null 2>&1||true; }
+setup_nat_forwarding(){ install -d -m 755 /opt/awg-vds/bin;cat << 'EOF' > /opt/awg-vds/bin/apply-nat.sh
+#!/bin/sh
+set -eu
+wan=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
+test -n "$wan" || wan=eth0
+for i in 1 2 3 4 5 6 7 8 9 10; do ip link show wg0 >/dev/null 2>&1 && break; sleep 1; done
+ip link show wg0 >/dev/null 2>&1
+
+ip link set dev wg0 txqueuelen 2000 2>/dev/null || true
+
+iptables -C INPUT -i wg0 -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -A INPUT -i wg0 -p udp --dport 53 -j ACCEPT
+iptables -C INPUT -i wg0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || iptables -A INPUT -i wg0 -p tcp --dport 53 -j ACCEPT
+
+iptables -C FORWARD -i wg0 -o "$wan" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -o "$wan" -j ACCEPT
+iptables -C FORWARD -i "$wan" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "$wan" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o "$wan" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$wan" -j MASQUERADE
+
+if [ "$VPN" = "443" ]; then
+  iptables -t nat -C PREROUTING -p udp --dport 1234 -j REDIRECT --to-ports 443 2>/dev/null || iptables -t nat -A PREROUTING -p udp --dport 1234 -j REDIRECT --to-ports 443
+elif [ "$VPN" = "1234" ]; then
+  iptables -t nat -C PREROUTING -p udp --dport 443 -j REDIRECT --to-ports 1234 2>/dev/null || iptables -t nat -A PREROUTING -p udp --dport 443 -j REDIRECT --to-ports 1234
+fi
+
+iptables -t mangle -C FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables -t mangle -C FORWARD -i wg0 -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1240 2>/dev/null || iptables -t mangle -A FORWARD -i wg0 -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1240
+iptables -t mangle -C FORWARD -o wg0 -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1240 2>/dev/null || iptables -t mangle -A FORWARD -o wg0 -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1240
+EOF
+chmod 755 /opt/awg-vds/bin/apply-nat.sh;cat << 'EOF' > /etc/systemd/system/awg-vds-forwarding.service
+[Unit]
+Description=AmneziaWG Client Forwarding and NAT
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/awg-vds/bin/apply-nat.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload;systemctl enable --now awg-vds-forwarding.service >/dev/null 2>&1||true;/opt/awg-vds/bin/apply-nat.sh; }
 rand_range(){ min="$1";max="$2";printf '%s' "$(( min + $(od -An -N4 -tu4 /dev/urandom) % (max - min + 1) ))"; }
 generate_awg_params(){
-  JC="$(rand_range 3 6)";JMIN="$(rand_range 40 89)";JMAX="$(( JMIN + $(rand_range 50 250) ))";S1="$(rand_range 15 150)";S2="$(rand_range 15 150)";
+  JC="$(rand_range 3 6)";JMIN="$(rand_range 40 80)";JMAX="$(( JMIN + $(rand_range 50 150) ))";S1="$(rand_range 15 150)";S2="$(rand_range 15 150)";
   while [ "$S2" = "$((S1 + 56))" ];do S2="$(rand_range 15 150)";done
   H1="$(rand_range 100000000 4294967294)";H2="$(rand_range 100000000 4294967294)";H3="$(rand_range 100000000 4294967294)";H4="$(rand_range 100000000 4294967294)";
   while [ "$H2" = "$H1" ];do H2="$(rand_range 100000000 4294967294)";done
   while [ "$H3" = "$H1" ]||[ "$H3" = "$H2" ];do H3="$(rand_range 100000000 4294967294)";done
   while [ "$H4" = "$H1" ]||[ "$H4" = "$H2" ]||[ "$H4" = "$H3" ];do H4="$(rand_range 100000000 4294967294)";done
 }
-write_env(){ p="$1";dev="$(ip route show default|awk '{print $5;exit}')";h="$(htpasswd -nbBC 12 '' "$p"|cut -d: -f2)";umask 077;t="$(mktemp /opt/awg-easy/.env.XXXXXX)";printf 'WG_HOST=%s\nWG_PORT=%s\nWEB_PORT=%s\nWG_DEVICE=%s\nPASSWORD_HASH=%s\nJC=%s\nJMIN=%s\nJMAX=%s\nS1=%s\nS2=%s\nH1=%s\nH2=%s\nH3=%s\nH4=%s\n' "$HOST" "$VPN" "$WEB" "$dev" "$h" "$JC" "$JMIN" "$JMAX" "$S1" "$S2" "$H1" "$H2" "$H3" "$H4" >"$t";chmod 600 "$t";mv "$t" /opt/awg-easy/.env; }
-run(){ docker pull ghcr.io/yokitoki/awg-easy:latest;docker rm -f amnezia-wg-easy >/dev/null 2>&1||true;docker run -d --name amnezia-wg-easy --network host --env-file /opt/awg-easy/.env -e LANG=ru -e UI_TRAFFIC_STATS=true -e WG_DEFAULT_DNS=1.1.1.1,1.0.0.1 -e WG_PERSISTENT_KEEPALIVE=25 -v /opt/awg-easy/wireguard:/etc/amnezia/amneziawg -v /opt/awg-easy/wireguard:/etc/wireguard --cap-add=NET_ADMIN --cap-add=SYS_MODULE --device /dev/net/tun:/dev/net/tun --restart unless-stopped ghcr.io/yokitoki/awg-easy:latest >/dev/null; }
+write_env(){ p="$1";dev="$(ip route show default|awk '{print $5;exit}')";h="$(htpasswd -nbBC 12 '' "$p"|cut -d: -f2)";umask 077;t="$(mktemp /opt/awg-easy/.env.XXXXXX)";printf 'WG_HOST=%s\nWG_PORT=%s\nWEB_PORT=%s\nWG_DEVICE=%s\nPASSWORD_HASH=%s\nJC=%s\nJMIN=%s\nJMAX=%s\nS1=%s\nS2=%s\nH1=%s\nH2=%s\nH3=%s\nH4=%s\nWG_MTU=1280\nWG_DEFAULT_DNS=10.8.0.1,1.1.1.1,8.8.8.8\n' "$HOST" "$VPN" "$WEB" "$dev" "$h" "$JC" "$JMIN" "$JMAX" "$S1" "$S2" "$H1" "$H2" "$H3" "$H4" >"$t";chmod 600 "$t";mv "$t" /opt/awg-easy/.env; }
+run(){ docker pull ghcr.io/yokitoki/awg-easy:latest;docker rm -f amnezia-wg-easy >/dev/null 2>&1||true;docker run -d --name amnezia-wg-easy --network host --env-file /opt/awg-easy/.env -e LANG=ru -e UI_TRAFFIC_STATS=true -e WG_DEFAULT_DNS=10.8.0.1,1.1.1.1,8.8.8.8 -e WG_PERSISTENT_KEEPALIVE=25 -v /opt/awg-easy/wireguard:/etc/amnezia/amneziawg -v /opt/awg-easy/wireguard:/etc/wireguard --cap-add=NET_ADMIN --cap-add=SYS_MODULE --device /dev/net/tun:/dev/net/tun --restart unless-stopped ghcr.io/yokitoki/awg-easy:latest >/dev/null; }
 tls(){ if [ -n "$TLS" ];then install -d -m 700 /opt/awg-easy/caddy-data /opt/awg-easy/caddy-config;printf '%s {\n reverse_proxy 127.0.0.1:%s\n}\n' "$TLS" "$WEB">/opt/awg-easy/Caddyfile;docker pull caddy:2-alpine;docker rm -f amnezia-wg-caddy >/dev/null 2>&1||true;docker run -d --name amnezia-wg-caddy --network host -v /opt/awg-easy/Caddyfile:/etc/caddy/Caddyfile:ro -v /opt/awg-easy/caddy-data:/data -v /opt/awg-easy/caddy-config:/config --restart unless-stopped caddy:2-alpine >/dev/null;elif [ "$DISABLE" = true ];then docker rm -f amnezia-wg-caddy >/dev/null 2>&1||true;fi; }
 firewall(){ [ "$UFW" = true ]||{ echo 'WARNING=Firewall was not modified; open required VDS/provider ports.';return;};command -v ufw >/dev/null||{ echo 'WARNING=UFW is unavailable.';return;};[ "$(ufw status|head -1)" = 'Status: active' ]||{ echo 'WARNING=UFW is inactive.';return;};ufw allow "$VPN/udp";if [ -n "$TLS" ];then ufw allow 80/tcp;ufw allow 443/tcp;[ "$RESTRICT" = true ]&&ufw deny "$WEB/tcp"||true;else ufw allow "$WEB/tcp";fi; }
 verify(){ h=;n=0;until [ "$h" = healthy ]||[ "$n" -ge 12 ];do h="$(docker inspect -f '{{.State.Health.Status}}' amnezia-wg-easy 2>/dev/null||true)";[ "$h" = healthy ]&&break;n=$((n+1));sleep 5;done;test "$h" = healthy;test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$WEB/")" = 200;docker exec amnezia-wg-easy awg show >/dev/null;ss -ltnH|grep -Eq "[:.]$WEB([[:space:]]|$)";ss -lunH|grep -Eq "[:.]$VPN([[:space:]]|$)"; }
@@ -106,12 +160,15 @@ case "$MODE" in
   Install)
     exists && { echo 'ERROR=Existing installation found. Use Update, Status, or Reconfigure -Force.' >&2; exit 1; }
     echo 'STEP=Устанавливаю Docker и системные пакеты...'; packages
-    echo 'STEP=Применяю sysctl (ip_forward, src_valid_mark)...'; sysctl_apply
+    echo 'STEP=Настраиваю swap...'; setup_swap
+    echo 'STEP=Применяю sysctl (BBR, буферы, forwarding)...'; sysctl_apply
     install -d -m 700 /opt/awg-easy/wireguard
     echo 'STEP=Генерирую параметры обфускации AmneziaWG...'; generate_awg_params
     p="$(openssl rand -hex 16)"
     write_env "$p"
     echo 'STEP=Запускаю контейнер AmneziaWG...'; run
+    echo 'STEP=Настраиваю локальный кэширующий DNS...'; setup_dns
+    echo 'STEP=Настраиваю маршрутизацию и TCPMSS...'; setup_nat_forwarding
     echo 'STEP=Настраиваю TLS (Caddy)...'; tls
     echo 'STEP=Настраиваю firewall (UFW)...'; firewall
     echo 'STEP=Проверяю, что сервис поднялся...'; verify
@@ -121,8 +178,11 @@ case "$MODE" in
   Update)
     exists || { echo 'ERROR=No installation found.' >&2; exit 1; }
     echo 'STEP=Устанавливаю Docker и системные пакеты...'; packages
-    echo 'STEP=Применяю sysctl...'; sysctl_apply
+    echo 'STEP=Настраиваю swap...'; setup_swap
+    echo 'STEP=Применяю sysctl (BBR, буферы, forwarding)...'; sysctl_apply
     echo 'STEP=Обновляю и перезапускаю контейнер AmneziaWG...'; run
+    echo 'STEP=Настраиваю локальный кэширующий DNS...'; setup_dns
+    echo 'STEP=Настраиваю маршрутизацию и TCPMSS...'; setup_nat_forwarding
     echo 'STEP=Настраиваю TLS (Caddy)...'; tls
     echo 'STEP=Настраиваю firewall (UFW)...'; firewall
     echo 'STEP=Проверяю, что сервис поднялся...'; verify
@@ -131,11 +191,14 @@ case "$MODE" in
   Reconfigure)
     exists || { echo 'ERROR=No installation found.' >&2; exit 1; }
     echo 'STEP=Устанавливаю Docker и системные пакеты...'; packages
-    echo 'STEP=Применяю sysctl...'; sysctl_apply
+    echo 'STEP=Настраиваю swap...'; setup_swap
+    echo 'STEP=Применяю sysctl (BBR, буферы, forwarding)...'; sysctl_apply
     echo 'STEP=Генерирую новые параметры обфускации AmneziaWG...'; generate_awg_params
     p="$(openssl rand -hex 16)"
     write_env "$p"
     echo 'STEP=Перезапускаю контейнер AmneziaWG...'; run
+    echo 'STEP=Настраиваю локальный кэширующий DNS...'; setup_dns
+    echo 'STEP=Настраиваю маршрутизацию и TCPMSS...'; setup_nat_forwarding
     echo 'STEP=Настраиваю TLS (Caddy)...'; tls
     echo 'STEP=Настраиваю firewall (UFW)...'; firewall
     echo 'STEP=Проверяю, что сервис поднялся...'; verify
