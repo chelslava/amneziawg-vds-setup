@@ -1,7 +1,7 @@
 # Инструкция для агентов
 
 ## Назначение
-Текущий продукт v2 — `awg-vds`, кроссплатформенный Go CLI для развёртывания AmneziaWG по SSH. `Install-AmneziaWG.ps1` сохранён как v1 Legacy и не должен задавать архитектуру v2.
+Текущий продукт v2 — `awg-vds`, кроссплатформенный Go-инструмент для развёртывания AmneziaWG по SSH с тремя интерфейсами: TUI-меню (Bubble Tea v2), локальная веб-GUI (`awg-vds gui`, только loopback + случайный токен) и флаговый режим. `Install-AmneziaWG.ps1` сохранён как v1 Legacy и не должен задавать архитектуру v2.
 
 ## Безопасный порядок работы
 1. Для v2 используй адрес VDS, SSH-пользователя и ключ; пароль допустим только интерактивно через OpenSSH.
@@ -14,10 +14,13 @@
 ## v2 технические инварианты
 - State: `/opt/awg-vds/install-state.json`; backups: `/opt/awg-vds/backups/`.
 - Образы v2 задаются immutable digest; `latest` запрещён CI-проверкой.
+- Дефолтный engine — `upstream` (wg-easy 15.5.0 с AmneziaWG); legacy доступен явно для WireSock-совместимости.
 - `install` не мигрирует Legacy ↔ Upstream; повторный запуск того же engine делает reconcile и отклоняет drift.
 - Update сначала создаёт полный backup и выполняет rollback после неуспешного health-check.
 - SSH требует `StrictHostKeyChecking=yes`; секреты, клиентские конфиги и `PASSWORD_HASH` не выводятся.
-- По умолчанию: VPN UDP `1234`, панель TCP `51821`; TLS или IP restriction обязателен для безопасной внешней панели.
+- Пароль панели: random secret в `/opt/awg-vds/panel-password` (0600). Legacy — bcrypt через env; upstream (wg-easy 15) — argon2-хеш в SQLite-базе (seed-шаг после первого старта контейнера; `PASSWORD_HASH` в env роняет контейнер и запрещён).
+- По умолчанию: VPN UDP `1234`, панель TCP `51821`; TLS или IP restriction обязателен для безопасной внешней панели (restriction работает и с TLS, и без).
+- GUI: слушает только loopback, страница и API защищены случайным токеном; SSH-пароль только в памяти.
 
 ## v1 Legacy инварианты
 - Образ сохраняется как `ghcr.io/yokitoki/awg-easy:latest` для совместимости пользователей v1; не переносить этот tag в v2.
@@ -32,4 +35,4 @@
 - Не делай автоматическую миграцию между engines и не меняй v1 поведение ради v2.
 
 ## Ограничения
-Панель выдаёт AmneziaWG Legacy-совместимые конфигурации, а не официальный AmneziaWG 2.0. Не добавляй persistence секретов ради автоматизации.
+Legacy-панель выдаёт AmneziaWG Legacy-совместимые конфигурации (WireSock-совместимость), а не официальный AmneziaWG 2.0. Установщик не заполняет CPS `I1–I5` ни в одном движке. Не добавляй persistence секретов ради автоматизации.

@@ -1,7 +1,7 @@
 # AmneziaWG VDS Setup v2
 <img width="836" height="470" alt="amneziawg-vpn-cli-banner-titled836" src="https://github.com/user-attachments/assets/5bea0d29-dd90-4e60-9221-b45e5abcd35f" />
 
-Кроссплатформенный консольный установщик личного AmneziaWG VPN на VDS. Основной язык — Go; один бинарник работает на Windows, Linux и macOS и использует установленный системный OpenSSH. Интерактивный интерфейс построен на Bubble Tea v2; флаговый режим сохраняется для automation.
+Кроссплатформенный установщик личного AmneziaWG VPN на VDS. Основной язык — Go; один бинарник работает на Windows, Linux и macOS и использует установленный системный OpenSSH. Три интерфейса: интерактивное TUI-меню (Bubble Tea v2), локальная веб-GUI-панель (`awg-vds gui`) и флаговый режим для automation.
 
 ## Установка бинарника
 
@@ -31,6 +31,7 @@ awg-vds status --host HOST [connection flags]
 awg-vds update --host HOST [connection flags]
 awg-vds backup --host HOST [connection flags]
 awg-vds rotate-password --host HOST [connection flags]
+awg-vds gui [--listen 127.0.0.1:8620]
 ```
 
 ### Интерактивное меню
@@ -43,7 +44,9 @@ awg-vds rotate-password --host HOST [connection flags]
 
 При ошибке TUI показывает безопасную причину и меню восстановления: `Retry`, `Run doctor`, `Use legacy` для применимых upstream-ошибок или `Back`. Возврат в меню выполняется только после явного выбора.
 
-Фиксированные параметры выбираются в выпадающих списках клавишами `↑/↓`, `j/k` и `Enter` (SSH auth, engine, TLS). `Esc` или ввод `back` возвращает на уровень меню без завершения приложения. Последние профили подключения сохраняются локально в `last-profile.json`; там нет паролей и клиентских конфигураций.
+Фиксированные параметры выбираются в выпадающих списках клавишами `↑/↓`, `j/k` и `Enter` (SSH auth, engine, TLS); движок `upstream` предвыбран по умолчанию. `Esc` или ввод `back` возвращает на уровень меню без завершения приложения. Последние профили подключения сохраняются локально в `last-profile.json`; там нет паролей и клиентских конфигураций.
+
+Меню не сохраняет SSH-пароль: при выборе password authentication его один раз запрашивает awg-vds без echo. Для CI используйте `--identity-file`; парольные неинтерактивные запуски намеренно отклоняются. Флаговый режим остаётся доступен для скриптов и CI.
 
 ```text
 awg-vds
@@ -62,8 +65,6 @@ TUI/CLI: установка, диагностика, статус, обновл�
 панели — с live-журналом операции и кнопкой отмены. Интерфейс на русском.
 SSH-пароль вводится в форму, держится только в памяти процесса и не попадает
 в журнал операции (ошибки проходят через `ssh.Redact`).
-
-Меню не сохраняет SSH-пароль: при выборе password authentication его один раз запрашивает awg-vds без echo. Для CI используйте `--identity-file`; парольные неинтерактивные запуски намеренно отклоняются. Флаговый режим остаётся доступен для скриптов и CI.
 
 `status`, `update` и `backup` загружают настройки движка, портов, домена и путей из `/opt/awg-vds/install-state.json`. Для SSH всё равно нужны адрес сервера и параметры подключения. `update` сначала создаёт backup и только потом заменяет контейнер. Повторный `install` того же движка выполняет безопасное reconcile; смена движка автоматически запрещена.
 
@@ -89,9 +90,9 @@ dnf copr enable amneziavpn/amneziawg
 dnf install amneziawg-dkms amneziawg-tools
 ```
 
-COPR является сторонним источником пакетов: `doctor` показывает его отсутствие,
-репозиторий подключается автоматически при установке upstream (см. выше).
-Нужны доступные `kernel-devel`/`kernel-headers`
+COPR — сторонний источник пакетов: `doctor` показывает его отсутствие, а
+установщик подключает репозиторий автоматически только как подписанный источник
+(см. выше). Нужны доступные `kernel-devel`/`kernel-headers`
 для запущенного ядра; после обновления ядра перезагрузка выполняется оператором,
 не установщиком. Если провайдер использует собственное ядро без headers, выберите
 Legacy или другой VDS.
@@ -138,7 +139,7 @@ Legacy и AmneziaWG 2.0 — разные сценарии. v2 не генери�
 
 При установке панель получает случайный пароль: исходный пароль хранится только на VDS в /opt/awg-vds/panel-password с 0600 и не попадает в state, operation logs или флаговый CLI-вывод. Legacy использует bcrypt-хеш через env; upstream (wg-easy 15) хранит argon2-хеш в своей базе — установщик сеет запись администратора `admin` после первого старта контейнера. После успешного интерактивного `install` финальное TUI-окно показывает сохраняемую карточку доступа: URL панели, логин `admin` для upstream, пароль панели, VPN UDP-порт, engine, SSH-команду и команду повторного чтения пароля; сохраните её в менеджере паролей. Повторно получить его можно отдельной SSH-командой `ssh root@HOST sudo cat /opt/awg-vds/panel-password`.
 
-Для плановой смены или восстановления доступа используйте `rotate-password`. Команда сначала создаёт backup, атомарно меняет защищённый файл и `PASSWORD_HASH`, перезапускает только контейнер панели, проверяет health и удаляет временную копию старого секрета только после успеха. Новый пароль не выводится флаговым CLI или operation logs; получите его отдельной интерактивной SSH-командой `ssh root@HOST sudo cat /opt/awg-vds/panel-password`. При сбое health выполняется rollback; plaintext не попадает в state, логи или GitHub Actions.
+Для плановой смены или восстановления доступа используйте `rotate-password`. Команда сначала создаёт backup, атомарно меняет защищённый файл пароля, проверяет health и удаляет временную копию старого секрета только после успеха. Механика зависит от движка: legacy получает новый bcrypt-хеш через env-файл, upstream — новый argon2-хеш записи администратора в базе панели (контейнер на время пересева останавливается). Новый пароль не выводится флаговым CLI, GUI или operation logs; получите его отдельной интерактивной SSH-командой `ssh root@HOST sudo cat /opt/awg-vds/panel-password`. При сбое health выполняется rollback к старому паролю; plaintext не попадает в state, логи или GitHub Actions.
 
 Backup создаётся на сервере в `/opt/awg-vds/backups/` с UTC-датой в имени, SHA-256 и правами `0600`. Snapshot включает VPN-конфигурацию, env-файлы, state, Caddy-данные и защищённый файл пароля панели, поэтому не копируйте его в публичное место. `update` не продолжает обновление, если backup не создан; при последующем health failure snapshot используется для rollback.
 
@@ -168,8 +169,10 @@ pwsh -ExecutionPolicy Bypass -File .\Install-AmneziaWG.ps1
 ```powershell
 go test ./...
 go vet ./...
-$env:GOOS='windows'; $env:GOARCH='amd64'; go build -trimpath -o dist/awg-vds-windows-amd64.exe ./cmd/awg-vds
-$env:GOOS='linux'; $env:GOARCH='amd64'; go build -trimpath -o dist/awg-vds-linux-amd64 ./cmd/awg-vds
+$env:GOOS='windows'; $env:GOARCH='amd64'; go build -trimpath -ldflags='-s -w' -o dist/awg-vds-windows-amd64.exe ./cmd/awg-vds
+$env:GOOS='linux'; $env:GOARCH='amd64'; go build -trimpath -ldflags='-s -w' -o dist/awg-vds-linux-amd64 ./cmd/awg-vds
+$env:GOOS='darwin'; $env:GOARCH='amd64'; go build -trimpath -ldflags='-s -w' -o dist/awg-vds-darwin-amd64 ./cmd/awg-vds
+$env:GOOS='darwin'; $env:GOARCH='arm64'; go build -trimpath -ldflags='-s -w' -o dist/awg-vds-darwin-arm64 ./cmd/awg-vds
 ```
 
-Workflow `.github/workflows/release.yml` повторяет тесты, собирает четыре бинарника и публикует `SHA256SUMS` для version tag.
+Workflow `.github/workflows/release.yml` повторяет тесты, собирает четыре бинарника (Windows/Linux amd64, macOS amd64/arm64 — все с GUI и TUI) и публикует `SHA256SUMS` для version tag.
