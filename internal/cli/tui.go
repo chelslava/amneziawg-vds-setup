@@ -253,16 +253,16 @@ func operationSummary(args []string, lang uiLanguage) []string {
 		}
 	}
 	risk := ""
-	if args[0] == "install" && get("--engine", "legacy") == "upstream" {
+	if args[0] == "install" && get("--engine", "upstream") == "upstream" {
 		risk = "APT full-upgrade: enabled; AmneziaWG PPA: ask if required"
 	}
 	if get("--domain", "") == "" && args[0] == "install" {
 		risk += " | WARNING: panel HTTP without domain/TLS"
 	}
 	if lang == langRU {
-		return []string{"Команда: " + args[0], "VDS: " + get("--host", "-"), "SSH: " + get("--user", "root") + ":" + get("--ssh-port", "22") + " (" + auth + ")", "Движок: " + get("--engine", "legacy"), "VPN UDP: " + get("--vpn-port", "1234"), "Панель TCP: " + get("--web-port", "51821"), "Домен: " + get("--domain", "нет"), "TLS: " + tls, "Timeout: " + timeout + " sec", risk}
+		return []string{"Команда: " + args[0], "VDS: " + get("--host", "-"), "SSH: " + get("--user", "root") + ":" + get("--ssh-port", "22") + " (" + auth + ")", "Движок: " + get("--engine", "upstream"), "VPN UDP: " + get("--vpn-port", "1234"), "Панель TCP: " + get("--web-port", "51821"), "Домен: " + get("--domain", "нет"), "TLS: " + tls, "Timeout: " + timeout + " sec", risk}
 	}
-	return []string{"Command: " + args[0], "VDS: " + get("--host", "-"), "SSH: " + get("--user", "root") + ":" + get("--ssh-port", "22") + " (" + auth + ")", "Engine: " + get("--engine", "legacy"), "VPN UDP: " + get("--vpn-port", "1234"), "Panel TCP: " + get("--web-port", "51821"), "Domain: " + get("--domain", "none"), "TLS: " + tls, "Timeout: " + timeout + " sec", risk}
+	return []string{"Command: " + args[0], "VDS: " + get("--host", "-"), "SSH: " + get("--user", "root") + ":" + get("--ssh-port", "22") + " (" + auth + ")", "Engine: " + get("--engine", "upstream"), "VPN UDP: " + get("--vpn-port", "1234"), "Panel TCP: " + get("--web-port", "51821"), "Domain: " + get("--domain", "none"), "TLS: " + tls, "Timeout: " + timeout + " sec", risk}
 }
 
 type operationMessage struct {
@@ -531,10 +531,16 @@ func installAccessNotice(lang uiLanguage, args []string, password string) string
 		sshCommand = fmt.Sprintf("ssh -p %d %s@%s", o.SSHPort, o.User, o.Host)
 	}
 	readPasswordCommand := sshCommand + " sudo cat /opt/awg-vds/panel-password"
-	if lang == langRU {
-		return fmt.Sprintf("Данные доступа к установленному стенду:\n\nПанель: %s\nЛогин панели: не требуется\nПароль панели: %s\nVPN UDP: %d\nEngine: %s\nSSH: %s\nПароль панели на сервере: /opt/awg-vds/panel-password\nПовторно прочитать: %s\n\nСохраните эти данные в менеджере паролей. awg-vds не пишет пароль панели в operation logs, state или флаговый CLI-вывод.", panelURL, password, o.VPNPort, o.Engine, sshCommand, readPasswordCommand)
+	panelLogin := "не требуется"
+	panelLoginEN := "not required"
+	if o.Engine == config.Upstream {
+		panelLogin = "admin"
+		panelLoginEN = "admin"
 	}
-	return fmt.Sprintf("Installed access details:\n\nPanel: %s\nPanel login: not required\nPanel password: %s\nVPN UDP: %d\nEngine: %s\nSSH: %s\nPanel password file: /opt/awg-vds/panel-password\nRead again: %s\n\nSave these details in a password manager. awg-vds does not write the panel password to operation logs, state, or flag-mode CLI output.", panelURL, password, o.VPNPort, o.Engine, sshCommand, readPasswordCommand)
+	if lang == langRU {
+		return fmt.Sprintf("Данные доступа к установленному стенду:\n\nПанель: %s\nЛогин панели: %s\nПароль панели: %s\nVPN UDP: %d\nEngine: %s\nSSH: %s\nПароль панели на сервере: /opt/awg-vds/panel-password\nПовторно прочитать: %s\n\nСохраните эти данные в менеджере паролей. awg-vds не пишет пароль панели в operation logs, state или флаговый CLI-вывод.", panelURL, panelLogin, password, o.VPNPort, o.Engine, sshCommand, readPasswordCommand)
+	}
+	return fmt.Sprintf("Installed access details:\n\nPanel: %s\nPanel login: %s\nPanel password: %s\nVPN UDP: %d\nEngine: %s\nSSH: %s\nPanel password file: /opt/awg-vds/panel-password\nRead again: %s\n\nSave these details in a password manager. awg-vds does not write the panel password to operation logs, state, or flag-mode CLI output.", panelURL, panelLoginEN, password, o.VPNPort, o.Engine, sshCommand, readPasswordCommand)
 }
 
 func installPanelURL(o config.Options) string {

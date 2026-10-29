@@ -104,7 +104,7 @@ func parse(args []string) (config.Options, *flag.FlagSet, error) {
 	if args[0] == "install" {
 		defaultTimeout = 1800
 	}
-	o := config.Options{Command: args[0], SSHPort: 22, User: "root", Engine: config.Legacy, VPNPort: 1234, WebPort: 51821, TimeoutSecs: defaultTimeout}
+	o := config.Options{Command: args[0], SSHPort: 22, User: "root", Engine: config.Upstream, VPNPort: 1234, WebPort: 51821, TimeoutSecs: defaultTimeout}
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&o.Host, "host", "", "VDS address")

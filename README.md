@@ -76,15 +76,20 @@ dnf install amneziawg-dkms amneziawg-tools
 ```
 
 COPR является сторонним источником пакетов: `doctor` показывает его отсутствие,
-а интерактивный `install` предлагает подключение. Non-interactive режим не
-меняет репозитории автоматически. Нужны доступные `kernel-devel`/`kernel-headers`
+репозиторий подключается автоматически при установке upstream (см. выше).
+Нужны доступные `kernel-devel`/`kernel-headers`
 для запущенного ядра; после обновления ядра перезагрузка выполняется оператором,
 не установщиком. Если провайдер использует собственное ядро без headers, выберите
 Legacy или другой VDS.
 
+По умолчанию `install` (без `--engine`) и интерактивная форма ставят движок
+`upstream` — это последняя версия панели wg-easy 15 с поддержкой AmneziaWG.
+Движок `legacy` остаётся доступным явно (`--engine legacy`) для WireSock-
+совместимости.
+
 ### `legacy` — стабильный сценарий v1
 
-- Образ: `ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f` (Legacy `0.2.15`, amd64).
+- Образ: `ghcr.io/yokitoki/awg-easy@sha256:92a55ac255302b033967b79e5561a12f6e5a4d8f3442d16631853428c6e65908` (Legacy `0.2.19`, amd64).
 - `--network host`, общий каталог `/opt/awg-vds/wireguard` монтируется в `/etc/amnezia/amneziawg` и `/etc/wireguard`.
 - Предназначен для Legacy-параметров AmneziaWG и совместимости с WireSock.
 - Поддерживается только Linux amd64; ARM отклоняется до начала установки.

@@ -42,7 +42,9 @@ func interactiveCommandLanguageMode(in lineInput, out io.Writer, choice string, 
 	}
 	args = append(args, connection...)
 	if command == "install" || command == "doctor" {
-		engine, err := selectInteractiveValue(in, raw, out, tr(lang, "engine"), []string{"legacy", "upstream"}, 0, useDropdown)
+		// Upstream (wg-easy 15.5.0 with AmneziaWG) is the default engine: it
+		// ships the latest panel; legacy stays available for WireSock setups.
+		engine, err := selectInteractiveValue(in, raw, out, tr(lang, "engine"), []string{"upstream", "legacy"}, 0, useDropdown)
 		if err != nil {
 			return nil, err
 		}

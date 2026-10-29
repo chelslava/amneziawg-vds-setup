@@ -15,8 +15,8 @@ const (
 	Legacy   Engine = "legacy"
 	Upstream Engine = "upstream"
 
-	LegacyImage         = "ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f"
-	LegacyImageOldTag   = "ghcr.io/yokitoki/awg-easy:1.0.1"
+	LegacyImage         = "ghcr.io/yokitoki/awg-easy@sha256:92a55ac255302b033967b79e5561a12f6e5a4d8f3442d16631853428c6e65908"
+	LegacyImageOldTag   = "ghcr.io/yokitoki/awg-easy@sha256:bfb9070d88379dc31ce55ef5588915964a2c3abd657249c696dd375202df3f6f"
 	UpstreamImage       = "ghcr.io/wg-easy/wg-easy@sha256:071f79a639e9361123a5e57733107320207b844ddbbd92dfa6962f541fe8aac8"
 	UpstreamImageOldTag = "ghcr.io/wg-easy/wg-easy@sha256:4ffc03c35dce5456bbb2fa6b136a1eeb196394548dee0650ae692efdd1062e01"
 )

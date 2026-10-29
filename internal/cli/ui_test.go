@@ -35,6 +35,21 @@ func TestInteractiveInstallBuildsSafeArguments(t *testing.T) {
 	}
 }
 
+func TestInteractiveInstallDefaultsToUpstreamEngine(t *testing.T) {
+	input := bufio.NewReader(strings.NewReader("vpn.example.com\nroot\n22\nkey\n\n\n\n1234\n51821\n\nno\n\n"))
+	args, err := interactiveCommand(input, &strings.Builder{}, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--engine upstream") {
+		t.Fatalf("empty engine choice must default to upstream: %s", joined)
+	}
+	if strings.Contains(joined, "--engine legacy") {
+		t.Fatalf("unexpected legacy engine in default install: %s", joined)
+	}
+}
+
 func TestInteractiveExistingCommandUsesConnectionOnly(t *testing.T) {
 	input := bufio.NewReader(strings.NewReader("198.51.100.10\nadmin\n2222\nkey\n\nknown_hosts\n"))
 	args, err := interactiveCommand(input, &strings.Builder{}, "2")
@@ -221,6 +236,16 @@ func TestInstallAccessNoticeShowsCompleteSaveableDetails(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("panel access notice view lacks %q: %s", want, view)
 		}
+	}
+}
+
+func TestInstallAccessNoticeNamesUpstreamAdminLogin(t *testing.T) {
+	notice := installAccessNotice(langRU, []string{"install", "--host", "45.38.249.191", "--user", "root", "--engine", "upstream", "--vpn-port", "1234", "--web-port", "51821"}, "test-panel-password")
+	if !strings.Contains(notice, "Логин панели: admin") {
+		t.Fatalf("upstream access notice must name the admin login: %s", notice)
+	}
+	if strings.Contains(notice, "Логин панели: не требуется") {
+		t.Fatalf("upstream access notice must not claim login-free panel: %s", notice)
 	}
 }
 
