@@ -37,6 +37,9 @@ func Run(args []string, out, errOut io.Writer) error {
 		usage(out)
 		return nil
 	}
+	if args[0] == "gui" {
+		return guiCommand(args[1:], out, errOut)
+	}
 	return runCommand(args, out, errOut)
 }
 
@@ -771,7 +774,8 @@ func externalPanelStatus(s state.State) string {
 }
 func usage(out io.Writer) {
 	fmt.Fprintln(out, "awg-vds v2.8.0 — cross-platform AmneziaWG VDS installer")
-	fmt.Fprintln(out, "Commands: install, status, update, backup, rotate-password, doctor")
+	fmt.Fprintln(out, "Commands: install, status, update, backup, rotate-password, doctor, gui")
 	fmt.Fprintln(out, "Common flags: --host HOST --ssh-port 22 --user root --identity-file PATH --known-hosts PATH")
 	fmt.Fprintln(out, "Install flags: --engine legacy|upstream --vpn-port 1234 --web-port 51821 --domain NAME --tls --restrict-panel-ip IP")
+	fmt.Fprintln(out, "GUI: gui [--listen 127.0.0.1:8620] — local web control panel (loopback + token)")
 }
