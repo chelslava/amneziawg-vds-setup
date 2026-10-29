@@ -175,3 +175,66 @@ func TestThirdPartyAmneziaRepositoryCommandUsesOfficialSignedPPA(t *testing.T) {
 		}
 	}
 }
+
+func TestUpstreamEnvFileOmitsPasswordHashAndMarksInsecureHTTP(t *testing.T) {
+	o := config.Options{Host: "198.51.100.7", VPNPort: 1234, WebPort: 51821}
+	s := state.State{Engine: config.Upstream, TLSMode: "disabled"}
+	cmd := envCommand(o, s)
+	if strings.Contains(cmd, "PASSWORD_HASH") {
+		t.Fatalf("upstream env must not contain PASSWORD_HASH: %s", cmd)
+	}
+	for _, want := range []string{"INSECURE=true", "WG_HOST=%s", "'198.51.100.7'", "upstream.env"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("upstream env command lacks %q: %s", want, cmd)
+		}
+	}
+	s.TLSMode = "caddy"
+	if strings.Contains(envCommand(o, s), "INSECURE=true") {
+		t.Fatal("TLS-protected upstream env must not enable insecure HTTP logins")
+	}
+}
+
+func TestLegacyEnvKeepsPasswordHash(t *testing.T) {
+	o := config.Options{Host: "198.51.100.7", VPNPort: 1234, WebPort: 51821}
+	s := state.State{Engine: config.Legacy, TLSMode: "disabled"}
+	cmd := envCommand(o, s)
+	if !strings.Contains(cmd, "PASSWORD_HASH=%s") || !strings.Contains(cmd, "htpasswd") || !strings.Contains(cmd, "legacy.env") {
+		t.Fatalf("legacy env command lost the hash contract: %s", cmd)
+	}
+	if strings.Contains(cmd, "INSECURE=true") {
+		t.Fatal("legacy env must not carry the upstream-only insecure flag")
+	}
+}
+
+func TestUpstreamSeedScriptProvisionsDatabasePanel(t *testing.T) {
+	for _, want := range []string{"argon2.hash", "users_table", "interfaces_table SET port", "user_configs_table SET host", "general_table SET setup_step = 0", "SEED_MODE"} {
+		if !strings.Contains(panelSeedScript, want) {
+			t.Fatalf("seed script lacks %q", want)
+		}
+	}
+	s := state.State{Engine: config.Upstream, Image: config.UpstreamImage, Container: "awg-vds-upstream", VPNPort: 1234, PanelHost: "198.51.100.7", TLSMode: "disabled"}
+	cmd := seedPanelCommand(s)
+	if !strings.Contains(cmd, "SEED_MODE=wait") || !strings.Contains(cmd, "SEED_MODE=setup") || !strings.Contains(cmd, "docker stop 'awg-vds-upstream'") || !strings.Contains(cmd, "seed-panel.mjs") {
+		t.Fatalf("seed command lifecycle is incomplete: %s", cmd)
+	}
+	if strings.Contains(cmd, s.PanelHost+"\\n") {
+		t.Fatalf("seed command leaks the host unexpectedly: %s", cmd)
+	}
+}
+
+func TestUpstreamRotateRehashesDatabaseInsteadOfEnv(t *testing.T) {
+	s := state.State{Engine: config.Upstream, Image: config.UpstreamImage, Container: "awg-vds-upstream", VPNPort: 1234, TLSMode: "disabled"}
+	rotate := rotatePasswordCommand(s)
+	for _, want := range []string{"SEED_MODE=rotate", ".panel-rotation.password", "docker stop 'awg-vds-upstream'"} {
+		if !strings.Contains(rotate, want) {
+			t.Fatalf("upstream rotate command lacks %q: %s", want, rotate)
+		}
+	}
+	if strings.Contains(rotate, "htpasswd") || strings.Contains(rotate, "PASSWORD_HASH=") {
+		t.Fatalf("upstream rotate must not touch env hash: %s", rotate)
+	}
+	rollback := rollbackPasswordCommand(s)
+	if !strings.Contains(rollback, "SEED_MODE=rotate") || !strings.Contains(rollback, "ROTATION=rolled-back") {
+		t.Fatalf("upstream rollback command is incomplete: %s", rollback)
+	}
+}

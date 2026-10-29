@@ -117,7 +117,7 @@ func parse(args []string) (config.Options, *flag.FlagSet, error) {
 	fs.IntVar(&o.WebPort, "web-port", 51821, "web TCP port")
 	fs.StringVar(&o.Domain, "domain", "", "public DNS name")
 	fs.BoolVar(&o.TLS, "tls", false, "enable pinned Caddy TLS proxy")
-	fs.StringVar(&o.RestrictIP, "restrict-panel-ip", "", "allow direct panel access only from this IP when TLS is enabled")
+	fs.StringVar(&o.RestrictIP, "restrict-panel-ip", "", "allow direct panel access only from this IP (works with and without TLS)")
 	fs.BoolVar(&o.Force, "force", false, "reserved for explicit destructive operations")
 	fs.IntVar(&o.TimeoutSecs, "timeout", defaultTimeout, "SSH command timeout in seconds")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -168,7 +168,7 @@ func install(ctx context.Context, c remoteRunner, o config.Options, out io.Write
 }
 
 func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, out io.Writer, prompt thirdPartyRepoPrompt) error {
-	const totalSteps = 9
+	const totalSteps = 10
 	installStep(out, 1, totalSteps, "Checking existing installation state")
 	old, found, err := readState(ctx, c)
 	if err != nil {
@@ -204,7 +204,16 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 		return errors.New("requested port is already occupied; inspect doctor output before installing")
 	}
 	if o.Engine == config.Upstream && (strings.Contains(pre, "AMNEZIAWG=unsupported") || strings.Contains(pre, "AMNEZIAWG=repository-unavailable")) {
+		autoApproved := false
 		if prompt != nil && supportedThirdPartyOS(pre) && prompt() {
+			autoApproved = true
+		} else if prompt == nil && supportedThirdPartyOS(pre) {
+			// One-command non-interactive install: the official AmneziaWG
+			// Launchpad PPA / COPR is signed and APT/DNF run with signature
+			// enforcement, so unsigned metadata still aborts the install.
+			autoApproved = true
+		}
+		if autoApproved {
 			if result, repoErr := c.Run(ctx, thirdPartyAmneziaRepositoryCommand()); repoErr != nil {
 				ssh.PrintOutput(out, result)
 				return fmt.Errorf("add official AmneziaWG repository: %w", repoErr)
@@ -224,6 +233,9 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 	if result, err := c.Run(ctx, dependenciesCommand(o.Engine == config.Upstream)); err != nil {
 		ssh.PrintOutput(out, result)
 		installFailed(out, "Preparing Docker and AmneziaWG dependencies", err)
+		if strings.Contains(result, "kernel-headers-unavailable-after-upgrade") || strings.Contains(result, "module-load-failed") || strings.Contains(result, "kernel-upgrade-failed") {
+			return errors.New("the kernel was upgraded or lacks AmneziaWG headers for the running kernel; reboot the VDS, then rerun the same install command to continue")
+		}
 		return err
 	}
 	installDone(out, "Preparing Docker and AmneziaWG dependencies")
@@ -244,7 +256,17 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 		return err
 	}
 	installDone(out, "Starting the selected VPN engine")
-	installStep(out, 6, totalSteps, "Configuring panel TLS")
+	if o.Engine == config.Upstream {
+		installStep(out, 6, totalSteps, "Seeding panel credentials into database")
+		if result, err := c.Run(ctx, seedPanelCommand(s)); err != nil {
+			ssh.PrintOutput(out, result)
+			installFailed(out, "Seeding panel credentials into database", err)
+			cleanupInitialInstall(ctx, c, s)
+			return err
+		}
+		installDone(out, "Seeding panel credentials into database")
+	}
+	installStep(out, 7, totalSteps, "Configuring panel TLS")
 	if result, err := c.Run(ctx, tlsengine.Command(o.TLS, o.Domain, o.WebPort)); err != nil {
 		ssh.PrintOutput(out, result)
 		installFailed(out, "Configuring panel TLS", err)
@@ -252,7 +274,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 		return err
 	}
 	installDone(out, "Configuring panel TLS")
-	installStep(out, 7, totalSteps, "Configuring firewall and port access")
+	installStep(out, 8, totalSteps, "Configuring firewall and port access")
 	if result, err := c.Run(ctx, firewall.Command(o.VPNPort, o.WebPort, o.TLS, o.RestrictIP)); err != nil {
 		ssh.PrintOutput(out, result)
 		installFailed(out, "Configuring firewall and port access", err)
@@ -260,7 +282,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 		return err
 	}
 	installDone(out, "Configuring firewall and port access")
-	installStep(out, 8, totalSteps, "Checking containers, HTTP panel, and UDP listener")
+	installStep(out, 9, totalSteps, "Checking containers, HTTP panel, and UDP listener")
 	if result, err := c.Run(ctx, healthRetryCommand(s)); err != nil {
 		ssh.PrintOutput(out, result)
 		installFailed(out, "Checking containers, HTTP panel, and UDP listener", err)
@@ -269,7 +291,7 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 	}
 	installDone(out, "Checking containers, HTTP panel, and UDP listener")
 	s.UpdatedAt = time.Now().UTC()
-	installStep(out, 9, totalSteps, "Saving installation state")
+	installStep(out, 10, totalSteps, "Saving installation state")
 	if err := writeState(ctx, c, s); err != nil {
 		installFailed(out, "Saving installation state", err)
 		cleanupInitialInstall(ctx, c, s)
@@ -281,7 +303,9 @@ func installWithPrompt(ctx context.Context, c remoteRunner, o config.Options, ou
 }
 
 func cleanupInitialInstall(ctx context.Context, c remoteRunner, s state.State) {
-	_, _ = c.Run(ctx, fmt.Sprintf("docker rm -f %s awg-vds-caddy >/dev/null 2>&1 || true", shellQuote(s.Container)))
+	// wg0 lives in the host network namespace and survives the container;
+	// a leftover interface keeps holding the VPN UDP port.
+	_, _ = c.Run(ctx, fmt.Sprintf("docker rm -f %s awg-vds-caddy >/dev/null 2>&1 || true; ip link del wg0 >/dev/null 2>&1 || true", shellQuote(s.Container)))
 }
 
 func supportedThirdPartyOS(preflightOutput string) bool {
@@ -571,20 +595,17 @@ func thirdPartyAmneziaRepositoryCommand() string {
 }
 
 func rotatePasswordCommand(s state.State) string {
-	envName := "upstream.env"
-	if s.Engine == config.Legacy {
-		envName = "legacy.env"
+	if s.Engine == config.Upstream {
+		return upstreamRotatePasswordCommand(s)
 	}
-	envPath := "/opt/awg-vds/" + envName
-	return fmt.Sprintf("set -eu; dir=/opt/awg-vds; env=%s; oldenv=$dir/.panel-rotation.env; oldpass=$dir/.panel-rotation.password; cp \"$env\" \"$oldenv\"; cp \"$dir/panel-password\" \"$oldpass\"; rollback(){ cp \"$oldenv\" \"$env\"; cp \"$oldpass\" \"$dir/panel-password\"; chmod 600 \"$env\" \"$dir/panel-password\"; docker restart %s >/dev/null 2>&1 || true; }; trap rollback ERR; new=$(openssl rand -hex 24); hash=$(printf '%%s\\n' \"$new\" | htpasswd -niBC 12 '' | cut -d: -f2-); awk -v h=\"$hash\" 'BEGIN{done=0} /^PASSWORD_HASH=/{print \"PASSWORD_HASH=\" h; done=1; next} {print} END{if(!done) exit 1}' \"$env\" >\"$env.tmp\"; printf '%%s\\n' \"$new\" >\"$dir/panel-password.tmp\"; chmod 600 \"$env.tmp\" \"$dir/panel-password.tmp\"; mv \"$env.tmp\" \"$env\"; mv \"$dir/panel-password.tmp\" \"$dir/panel-password\"; docker restart %s >/dev/null; trap - ERR; printf 'ROTATION=prepared\\n'", shellQuote(envPath), shellQuote(s.Container), shellQuote(s.Container))
+	return fmt.Sprintf("set -eu; dir=/opt/awg-vds; env=%s; oldenv=$dir/.panel-rotation.env; oldpass=$dir/.panel-rotation.password; cp \"$env\" \"$oldenv\"; cp \"$dir/panel-password\" \"$oldpass\"; rollback(){ cp \"$oldenv\" \"$env\"; cp \"$oldpass\" \"$dir/panel-password\"; chmod 600 \"$env\" \"$dir/panel-password\"; docker restart %s >/dev/null 2>&1 || true; }; trap rollback ERR; new=$(openssl rand -hex 24); hash=$(printf '%%s\\n' \"$new\" | htpasswd -niBC 12 '' | cut -d: -f2-); awk -v h=\"$hash\" 'BEGIN{done=0} /^PASSWORD_HASH=/{print \"PASSWORD_HASH=\" h; done=1; next} {print} END{if(!done) exit 1}' \"$env\" >\"$env.tmp\"; printf '%%s\\n' \"$new\" >\"$dir/panel-password.tmp\"; chmod 600 \"$env.tmp\" \"$dir/panel-password.tmp\"; mv \"$env.tmp\" \"$env\"; mv \"$dir/panel-password.tmp\" \"$dir/panel-password\"; docker restart %s >/dev/null; trap - ERR; printf 'ROTATION=prepared\\n'", shellQuote("/opt/awg-vds/legacy.env"), shellQuote(s.Container), shellQuote(s.Container))
 }
 
 func rollbackPasswordCommand(s state.State) string {
-	envName := "upstream.env"
-	if s.Engine == config.Legacy {
-		envName = "legacy.env"
+	if s.Engine == config.Upstream {
+		return "set -eu; cp /opt/awg-vds/.panel-rotation.password /opt/awg-vds/panel-password; chmod 600 /opt/awg-vds/panel-password; docker stop " + shellQuote(s.Container) + " >/dev/null; docker run --rm --entrypoint node -e SEED_MODE=rotate " + upstreamSeedMounts + " " + shellQuote(seedImage(s)) + " /app/server/seed-panel.mjs >/dev/null; docker start " + shellQuote(s.Container) + " >/dev/null; printf 'ROTATION=rolled-back\\n'"
 	}
-	return fmt.Sprintf("set -eu; cp /opt/awg-vds/.panel-rotation.env /opt/awg-vds/%s; cp /opt/awg-vds/.panel-rotation.password /opt/awg-vds/panel-password; chmod 600 /opt/awg-vds/%s /opt/awg-vds/panel-password; docker restart %s >/dev/null; printf 'ROTATION=rolled-back\\n'", envName, envName, shellQuote(s.Container))
+	return fmt.Sprintf("set -eu; cp /opt/awg-vds/.panel-rotation.env /opt/awg-vds/legacy.env; cp /opt/awg-vds/.panel-rotation.password /opt/awg-vds/panel-password; chmod 600 /opt/awg-vds/legacy.env /opt/awg-vds/panel-password; docker restart %s >/dev/null; printf 'ROTATION=rolled-back\\n'", shellQuote(s.Container))
 }
 
 func cleanupPasswordRotationCommand() string {
@@ -592,16 +613,96 @@ func cleanupPasswordRotationCommand() string {
 }
 func envCommand(o config.Options, s state.State) string {
 	name := "upstream.env"
+	format := "WG_HOST=%s\\nPORT=%d\\nWG_PORT=%d\\nWG_PERSISTENT_KEEPALIVE=25\\nWG_DEFAULT_DNS=1.1.1.1,1.0.0.1\\n"
+	values := shellQuote(hostForPanel(o)) + " " + strconv.Itoa(o.WebPort) + " " + strconv.Itoa(o.VPNPort)
+	hashStep := ""
 	if s.Engine == config.Legacy {
 		name = "legacy.env"
+		format += "PASSWORD_HASH=%s\\n"
+		values += " \"$panel_hash\""
+		hashStep = "panel_hash=$(printf '%s\\n' \"$(cat /opt/awg-vds/panel-password)\" | htpasswd -niBC 12 '' | cut -d: -f2-); "
+	} else if s.TLSMode != "caddy" {
+		// wg-easy 15 refuses to start when a hash is provided via env and refuses
+		// non-HTTPS logins unless the panel explicitly runs in insecure mode.
+		format += "INSECURE=true\\n"
 	}
-	return fmt.Sprintf("set -eu; install -d -m 700 /opt/awg-vds; umask 077; if test ! -s /opt/awg-vds/panel-password; then openssl rand -hex 24 > /opt/awg-vds/panel-password; fi; panel_hash=$(printf '%%s\\n' \"$(cat /opt/awg-vds/panel-password)\" | htpasswd -niBC 12 '' | cut -d: -f2-); tmp=$(mktemp /opt/awg-vds/env.XXXXXX); printf 'WG_HOST=%%s\\nPORT=%%d\\nWG_PORT=%%d\\nWG_PERSISTENT_KEEPALIVE=25\\nWG_DEFAULT_DNS=1.1.1.1,1.0.0.1\\nPASSWORD_HASH=%%s\\n' %s %d %d \"$panel_hash\" >\"$tmp\"; chmod 600 \"$tmp\"; mv \"$tmp\" /opt/awg-vds/%s; printf 'CONFIG=preserved\\n'", shellQuote(hostForPanel(o)), o.WebPort, o.VPNPort, name)
+	return "set -eu; install -d -m 700 /opt/awg-vds; umask 077; if test ! -s /opt/awg-vds/panel-password; then openssl rand -hex 24 > /opt/awg-vds/panel-password; fi; " + hashStep + "tmp=$(mktemp /opt/awg-vds/env.XXXXXX); printf '" + format + "' " + values + " >\"$tmp\"; chmod 600 \"$tmp\"; mv \"$tmp\" /opt/awg-vds/" + name + "; printf 'CONFIG=preserved\\n'"
 }
 func hostForPanel(o config.Options) string {
 	if o.Domain != "" {
 		return o.Domain
 	}
 	return o.Host
+}
+
+// panelSeedScript runs inside the pinned wg-easy 15 image with NODE module paths
+// from /app/server. It is the only supported way to provision panel credentials:
+// wg-easy 15 stores argon2 hashes in its SQLite database and refuses env-based
+// passwords entirely. SEED_MODE=wait polls until first boot created the schema,
+// SEED_MODE=setup provisions the admin account and VPN port, SEED_MODE=rotate
+// rehashes the admin password after /opt/awg-vds/panel-password was replaced.
+const panelSeedScript = `import fs from 'node:fs';
+import { createClient } from '@libsql/client';
+import argon2 from 'argon2';
+const mode = process.env.SEED_MODE || 'setup';
+const db = createClient({ url: 'file:/data/wg-easy.db' });
+const password = fs.readFileSync('/panel-password', 'utf8').trim();
+if (!password) { console.error('PANEL_SEEDED=empty-password-file'); process.exit(1); }
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+if (mode === 'wait') {
+  let ready = false;
+  for (let i = 0; i < 30 && !ready; i += 1) {
+    try {
+      const rows = await db.execute('SELECT name FROM interfaces_table LIMIT 1');
+      ready = rows.rows.length > 0;
+    } catch (err) { ready = false; }
+    if (!ready) await wait(2000);
+  }
+  if (!ready) { console.error('PANEL_SEEDED=database-not-ready'); process.exit(1); }
+  console.log('PANEL_READY=ok');
+  process.exit(0);
+}
+const port = Number(process.env.VPN_PORT || '1234');
+const host = process.env.PANEL_HOST || '';
+const interfaces = await db.execute('SELECT name FROM interfaces_table LIMIT 1');
+if (interfaces.rows.length === 0) { console.error('PANEL_SEEDED=no-interface-row'); process.exit(1); }
+const name = String(interfaces.rows[0].name);
+await db.execute({ sql: 'UPDATE interfaces_table SET port = ? WHERE name = ?', args: [port, name] });
+await db.execute({ sql: 'UPDATE user_configs_table SET host = ?, port = ?, default_persistent_keepalive = 25 WHERE id = ?', args: [host, port, name] });
+const users = await db.execute('SELECT COUNT(*) AS n FROM users_table');
+if (Number(users.rows[0].n) === 0) {
+  const hash = await argon2.hash(password);
+  await db.execute({ sql: "INSERT INTO users_table (username, password, email, name, role, totp_verified, enabled) VALUES ('admin', ?, NULL, 'admin', 1, 0, 1)", args: [hash] });
+} else if (mode === 'rotate') {
+  const hash = await argon2.hash(password);
+  await db.execute({ sql: "UPDATE users_table SET password = ? WHERE username = 'admin'", args: [hash] });
+}
+await db.execute('UPDATE general_table SET setup_step = 0');
+console.log('PANEL_SEEDED=ok');
+`
+
+func seedImage(s state.State) string {
+	if s.Image != "" {
+		return s.Image
+	}
+	return config.UpstreamImage
+}
+
+const upstreamSeedMounts = "-v /opt/awg-vds/wireguard:/data -v /opt/awg-vds/panel-password:/panel-password:ro -v /opt/awg-vds/bin/seed-panel.mjs:/app/server/seed-panel.mjs:ro"
+
+// seedPanelCommand provisions the wg-easy 15 panel database after the first
+// container boot: VPN port, panel host, keepalive default, the admin account
+// with an argon2 hash of /opt/awg-vds/panel-password, and setup completion.
+func seedPanelCommand(s state.State) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(panelSeedScript))
+	return "set -eu; install -d -m 700 /opt/awg-vds/bin; printf '%s' " + shellQuote(encoded) + " | base64 -d > /opt/awg-vds/bin/seed-panel.mjs; chmod 700 /opt/awg-vds/bin/seed-panel.mjs; db=/opt/awg-vds/wireguard/wg-easy.db; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do test -s \"$db\" && break; sleep 2; done; test -s \"$db\"; docker run --rm --entrypoint node -e SEED_MODE=wait " + upstreamSeedMounts + " " + shellQuote(seedImage(s)) + " /app/server/seed-panel.mjs >/dev/null; docker stop " + shellQuote(s.Container) + " >/dev/null; trap 'docker start " + shellQuote(s.Container) + " >/dev/null 2>&1 || true' ERR; docker run --rm --entrypoint node -e SEED_MODE=setup -e VPN_PORT=" + strconv.Itoa(s.VPNPort) + " -e PANEL_HOST=" + shellQuote(s.PanelHost) + " " + upstreamSeedMounts + " " + shellQuote(seedImage(s)) + " /app/server/seed-panel.mjs; docker start " + shellQuote(s.Container) + " >/dev/null; trap - ERR; printf 'PANEL_SEEDED=ok\\n'"
+}
+
+// upstreamRotatePasswordCommand swaps the panel password by rewriting the
+// protected password file and rehashing the admin row inside the database.
+func upstreamRotatePasswordCommand(s state.State) string {
+	image := shellQuote(seedImage(s))
+	return "set -eu; dir=/opt/awg-vds; test -s $dir/bin/seed-panel.mjs; oldpass=$dir/.panel-rotation.password; cp $dir/panel-password $oldpass; chmod 600 $oldpass; rehash(){ docker stop " + shellQuote(s.Container) + " >/dev/null 2>&1 || true; docker run --rm --entrypoint node -e SEED_MODE=rotate " + upstreamSeedMounts + " " + image + " /app/server/seed-panel.mjs >/dev/null; docker start " + shellQuote(s.Container) + " >/dev/null; }; rollback(){ cp $oldpass $dir/panel-password; chmod 600 $dir/panel-password; rehash; }; trap rollback ERR; new=$(openssl rand -hex 24); printf '%s\\n' \"$new\" > $dir/panel-password.tmp; chmod 600 $dir/panel-password.tmp; mv $dir/panel-password.tmp $dir/panel-password; rehash; trap - ERR; printf 'ROTATION=prepared\\n'"
 }
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 func writeState(ctx context.Context, c remoteRunner, s state.State) error {
@@ -669,7 +770,7 @@ func externalPanelStatus(s state.State) string {
 	return fmt.Sprintf("reachable (HTTP %d)", resp.StatusCode)
 }
 func usage(out io.Writer) {
-	fmt.Fprintln(out, "awg-vds v2.2.1 — cross-platform AmneziaWG VDS installer")
+	fmt.Fprintln(out, "awg-vds v2.8.0 — cross-platform AmneziaWG VDS installer")
 	fmt.Fprintln(out, "Commands: install, status, update, backup, rotate-password, doctor")
 	fmt.Fprintln(out, "Common flags: --host HOST --ssh-port 22 --user root --identity-file PATH --known-hosts PATH")
 	fmt.Fprintln(out, "Install flags: --engine legacy|upstream --vpn-port 1234 --web-port 51821 --domain NAME --tls --restrict-panel-ip IP")

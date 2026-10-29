@@ -22,6 +22,16 @@ func TestPlainHTTPFirewallOpensConfiguredPanel(t *testing.T) {
 	}
 }
 
+func TestPlainHTTPFirewallRestrictsPanelByIP(t *testing.T) {
+	cmd := Command(1234, 51821, false, "198.51.100.7")
+	if !strings.Contains(cmd, "ufw insert 1 allow from 198.51.100.7") || !strings.Contains(cmd, "ufw insert 2 deny 51821/tcp") {
+		t.Fatalf("restricted plain HTTP policy is incomplete: %s", cmd)
+	}
+	if strings.Contains(cmd, "ufw allow 51821/tcp") {
+		t.Fatalf("restricted plain HTTP policy must not open the panel globally: %s", cmd)
+	}
+}
+
 func TestTLSFirewallRestrictsBackendPanel(t *testing.T) {
 	cmd := Command(1234, 51821, true, "198.51.100.7")
 	if !strings.Contains(cmd, "ufw insert 1 allow from 198.51.100.7") || !strings.Contains(cmd, "ufw insert 2 deny 51821/tcp") {

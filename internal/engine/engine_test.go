@@ -79,3 +79,25 @@ func TestInstallCommandsConfigureWireGuardForwarding(t *testing.T) {
 		}
 	}
 }
+
+func TestUpstreamCommandMountsKernelModuleAndCustomHealthcheck(t *testing.T) {
+	e, _ := Select(config.Upstream)
+	s := state.State{Engine: config.Upstream, Image: e.Image(), Container: e.Container(), VPNPort: 1234, WebPort: 51821, TLSMode: "disabled", ConfigPath: "/opt/awg-vds/wireguard", BackupPath: "/opt/awg-vds/backups", Version: 1}
+	cmd := e.InstallCommand(s)
+	for _, want := range []string{
+		"-v /opt/awg-vds/wireguard:/etc/wireguard",
+		"-v /opt/awg-vds/wireguard:/etc/amnezia/amneziawg",
+		"-v /lib/modules:/lib/modules:ro",
+		"--env EXPERIMENTAL_AWG=true",
+		"--env OVERRIDE_AUTO_AWG=awg",
+		"--env-file /opt/awg-vds/upstream.env",
+		"--health-cmd 'awg show | grep -q interface || exit 1'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("upstream command lacks %q: %s", want, cmd)
+		}
+	}
+	if strings.Contains(cmd, "PASSWORD_HASH") {
+		t.Fatalf("upstream command must not carry PASSWORD_HASH: %s", cmd)
+	}
+}

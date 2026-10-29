@@ -66,8 +66,9 @@ Legacy дополнительно сохраняет ограничение amd6
 
 Для Ubuntu/Debian используются подписанные APT-репозитории. Для Fedora/RHEL-
 подобных систем используются `dnf`, EPEL при необходимости и Docker Compose.
-При upstream без установленного модуля установщик только после явного согласия
-может подключить официальный AmneziaWG COPR:
+При upstream без установленного модуля установщик подключает официальный
+репозиторий AmneziaWG автоматически (Launchpad PPA на Ubuntu, COPR на
+Fedora/RHEL-семействе) — достаточно одной команды install:
 
 ```text
 dnf copr enable amneziavpn/amneziawg
@@ -88,15 +89,18 @@ Legacy или другой VDS.
 - Предназначен для Legacy-параметров AmneziaWG и совместимости с WireSock.
 - Поддерживается только Linux amd64; ARM отклоняется до начала установки.
 
-### `upstream` — экспериментальный сценарий
+### `upstream` — сценарий wg-easy 15 с AmneziaWG
 
-- Образ: `ghcr.io/wg-easy/wg-easy@sha256:4ffc03c35dce5456bbb2fa6b136a1eeb196394548dee0650ae692efdd1062e01` (upstream `15.2.1`).
+- Образ: `ghcr.io/wg-easy/wg-easy@sha256:071f79a639e9361123a5e57733107320207b844ddbbd92dfa6962f541fe8aac8` (upstream `15.5.0`, поддержка AmneziaWG 3.1).
 - Проверяет наличие или installability `amneziawg`, пытается установить пакет из настроенных репозиториев и включает `EXPERIMENTAL_AWG=true`.
-- Требует kernel module AmneziaWG; если модуль недоступен, установка останавливается с диагностикой.
-- В интерактивном `install` на Ubuntu при отсутствии пакета предлагает явно добавить официальный [AmneziaWG PPA](https://launchpad.net/~amnezia/+archive/ubuntu/ppa), затем повторяет preflight. Ответ `no`, non-interactive CLI и Debian не изменяют APT-источники автоматически.
-- Перед upstream-зависимостями выполняется подписанный `apt full-upgrade -y`; если для текущего ядра headers всё ещё недоступны, установщик останавливается и просит вручную перезагрузить VDS после обновления ядра.
+- Требует kernel module AmneziaWG; если модуль недоступен, установка останавливается с диагностикой. Поставляемый в образе `amneziawg-go` приложением не используется: интерфейс всегда управляется через `awg-quick` против kernel-модуля.
+- Официальные репозитории AmneziaWG ([Launchpad PPA](https://launchpad.net/~amnezia/+archive/ubuntu/ppa) для Ubuntu, COPR для Fedora/RHEL-семейства) подключаются автоматически при отсутствии модуля — и в интерактивном режиме, и в non-interactive «одной командой». Репозитории подписаны, APT/DNF работают с проверкой подписей (`AllowUnauthenticated=false`), поэтому не подписанные метаданные останавливают установку. Debian не поддерживает этот путь и требует ручной настройки.
+- Перед upstream-зависимостями выполняется подписанный `apt full-upgrade -y`; если для текущего ядра headers всё ещё недоступны (старые cloud-образы), установщик останавливается с подсказкой: перезагрузите VDS и повторите ту же команду install.
+- Пароль панели: wg-easy 15 не принимает пароль через env (`PASSWORD_HASH` роняет контейнер) и хранит argon2-хеши в SQLite-базе. Установщик генерирует пароль в защищённый файл `/opt/awg-vds/panel-password`, после первого старта контейнера сеет администратора (`admin`), VPN-порт и хост панели прямо в базу образа и помечает мастер настройки завершённым. `rotate-password` для upstream перезаписывает файл и пере-хеширует запись в базе.
+- Контейнер запускается с монтированием `/lib/modules:ro` (для ip6tables внутри PostUp) и healthcheck на `awg show` вместо штатного `wg show`, который не видит amneziawg-интерфейсы.
+- Панель без TLS работает по HTTP: wg-easy 15 блокирует вход по незащищённому соединению, поэтому при `--tls` не выставлен env `INSECURE=true`. Комбинируйте HTTP-панель с `--restrict-panel-ip` — ограничение по IP теперь действует и без TLS (UFW insert allow/deny, firewall-cmd rich rule).
 - Это не миграция Legacy и не обновление Legacy. Разворачивайте его как отдельную новую установку.
-- Upstream AmneziaWG остаётся экспериментальным; upstream предупреждает, что AmneziaWG может ломать стандартный healthcheck. Поэтому v2 дополнительно проверяет контейнер, локальный HTTP, `awg/wg show` и TCP/UDP listeners.
+- Upstream AmneziaWG остаётся экспериментальным; штатный healthcheck образа в AWG-режиме всегда unhealthy, поэтому v2 переопределяет его и дополнительно проверяет контейнер, локальный HTTP, `awg/wg show` и TCP/UDP listeners.
 
 Legacy и AmneziaWG 2.0 — разные сценарии. v2 не генерирует CPS `I1–I5` автоматически и не считает, что все AWG-параметры обязаны совпадать: у `Jc/Jmin/Jmax`, `S1–S4`, `H1–H4` и `I1–I5` разные правила совместимости. CPS можно будет добавить отдельным явно документированным режимом.
 Будущий контракт opt-in и parser fixtures описаны в [`docs/cps-contract.md`](docs/cps-contract.md); до его реализации CPS остаётся `disabled`.
@@ -113,7 +117,7 @@ Legacy и AmneziaWG 2.0 — разные сценарии. v2 не генери�
 
 Серверное состояние хранится в `/opt/awg-vds/install-state.json` и содержит engine, pinned image, порты, домен, TLS-режим, даты, пути и метаданные последнего backup (путь и SHA-256). SSH-пароли, приватные ключи, `PASSWORD_HASH` и клиентские конфигурации туда не записываются.
 
-При установке панель получает случайный bcrypt-пароль: исходный пароль хранится только на VDS в /opt/awg-vds/panel-password с 0600 и не попадает в state, operation logs или флаговый CLI-вывод. После успешного интерактивного `install` финальное TUI-окно показывает сохраняемую карточку доступа: URL панели, отсутствие логина панели, пароль панели, VPN UDP-порт, engine, SSH-команду и команду повторного чтения пароля; сохраните её в менеджере паролей. Повторно получить его можно отдельной SSH-командой `ssh root@HOST sudo cat /opt/awg-vds/panel-password`.
+При установке панель получает случайный пароль: исходный пароль хранится только на VDS в /opt/awg-vds/panel-password с 0600 и не попадает в state, operation logs или флаговый CLI-вывод. Legacy использует bcrypt-хеш через env; upstream (wg-easy 15) хранит argon2-хеш в своей базе — установщик сеет запись администратора `admin` после первого старта контейнера. После успешного интерактивного `install` финальное TUI-окно показывает сохраняемую карточку доступа: URL панели, логин `admin` для upstream, пароль панели, VPN UDP-порт, engine, SSH-команду и команду повторного чтения пароля; сохраните её в менеджере паролей. Повторно получить его можно отдельной SSH-командой `ssh root@HOST sudo cat /opt/awg-vds/panel-password`.
 
 Для плановой смены или восстановления доступа используйте `rotate-password`. Команда сначала создаёт backup, атомарно меняет защищённый файл и `PASSWORD_HASH`, перезапускает только контейнер панели, проверяет health и удаляет временную копию старого секрета только после успеха. Новый пароль не выводится флаговым CLI или operation logs; получите его отдельной интерактивной SSH-командой `ssh root@HOST sudo cat /opt/awg-vds/panel-password`. При сбое health выполняется rollback; plaintext не попадает в state, логи или GitHub Actions.
 
@@ -126,7 +130,7 @@ Backup создаётся на сервере в `/opt/awg-vds/backups/` с UTC-
 - Не используйте `--password`, `--ssh-password` и другие секретные аргументы — CLI их отклоняет.
 - Не передавайте `PASSWORD_HASH`, приватные ключи или клиентские `.conf` через логи.
 - Образы v2 используют immutable digest; обновление происходит только для явно закреплённого image reference в state. Legacy v1 PowerShell сохраняет отдельный исторический `latest` контракт.
-- APT используется только через системные подписанные метаданные Ubuntu/Debian: v2 передаёт `AllowInsecureRepositories=false` и `AllowUnauthenticated=false`, поэтому unsigned/unauthenticated source останавливает установку. Для Fedora/RHEL COPR подключается только после явного подтверждения пользователя. Обновление digest или action SHA требует сверки upstream release, локального `go test`/`go vet` и CI run; исходные v1 pins не переносите в v2 автоматически.
+- APT используется только через системные подписанные метаданные Ubuntu/Debian: v2 передаёт `AllowInsecureRepositories=false` и `AllowUnauthenticated=false`, поэтому unsigned/unauthenticated source останавливает установку. Официальные репозитории AmneziaWG (Launchpad PPA и COPR) подключаются автоматически и только как подписанные источники; не подписанные метаданные всё равно прерывают установку. Обновление digest или action SHA требует сверки upstream release, локального `go test`/`go vet` и CI run; исходные v1 pins не переносите в v2 автоматически.
 - Передавайте ключ через `--identity-file`; после настройки отключите SSH password login и root password login.
 - Проверьте ownership VDS до запуска. TLS требует, чтобы DNS уже указывал на VDS.
 

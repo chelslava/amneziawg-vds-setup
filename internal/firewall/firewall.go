@@ -18,9 +18,11 @@ func Command(vpnPort, webPort int, tlsEnabled bool, restrictIP string) string {
 		} else {
 			fmt.Fprintf(&b, "ufw deny %d/tcp >/dev/null; ", webPort)
 		}
-	} else {
-		fmt.Fprintf(&b, "ufw allow %d/tcp >/dev/null; ", webPort)
-	}
+		} else if restrictIP != "" {
+			fmt.Fprintf(&b, "ufw insert 1 allow from %s to any port %d proto tcp >/dev/null; ufw insert 2 deny %d/tcp >/dev/null; ", restrictIP, webPort, webPort)
+		} else {
+			fmt.Fprintf(&b, "ufw allow %d/tcp >/dev/null; ", webPort)
+		}
 	b.WriteString("printf 'FIREWALL=ufw\\n'; elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then ")
 	fmt.Fprintf(&b, "firewall-cmd --permanent --add-port=%d/udp >/dev/null; firewall-cmd --permanent --add-masquerade >/dev/null; firewall-cmd --permanent --zone=trusted --add-interface=wg0 >/dev/null 2>&1 || true; ", vpnPort)
 	if tlsEnabled {
