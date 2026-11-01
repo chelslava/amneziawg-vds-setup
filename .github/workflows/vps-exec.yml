@@ -1,0 +1,31 @@
+name: VPS exec (diagnostics)
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        default: "45.38.23.86"
+      ssh_port:
+        default: "443"
+      command:
+        description: "Command to run as root on the VDS"
+        required: true
+
+jobs:
+  exec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_awg
+          chmod 600 ~/.ssh/id_awg
+          ssh-keyscan -p "${{ inputs.ssh_port }}" "${{ inputs.host }}" > ./known_hosts 2>/dev/null
+          test -s ./known_hosts
+      - name: Run command
+        run: |
+          ssh -p "${{ inputs.ssh_port }}" -i ~/.ssh/id_awg \
+            -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes root@"${{ inputs.host }}" "${{ inputs.command }}"
