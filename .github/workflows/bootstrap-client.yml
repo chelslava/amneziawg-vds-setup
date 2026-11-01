@@ -1,0 +1,49 @@
+name: Bootstrap VPS client (firewall and first client)
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: "VDS IP"
+        default: "45.38.23.86"
+      ssh_port:
+        description: "SSH port on the VDS"
+        default: "443"
+      panel_ip:
+        description: "IP allowed to open the panel"
+        default: "176.15.86.65"
+      home_ip:
+        description: "Second IP allowed to open the panel"
+        default: "95.25.41.234"
+      client_name:
+        description: "First VPN client name"
+        default: "phone"
+      client_password:
+        description: "Password used to encrypt client config in logs"
+        required: true
+
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_awg
+          chmod 600 ~/.ssh/id_awg
+          ssh-keyscan -p "${{ inputs.ssh_port }}" "${{ inputs.host }}" > ./known_hosts 2>/dev/null
+          test -s ./known_hosts
+
+      - name: Firewall and first client
+        env:
+          HOST: ${{ inputs.host }}
+          SSH_PORT: ${{ inputs.ssh_port }}
+          PANEL_IP: ${{ inputs.panel_ip }}
+          HOME_IP: ${{ inputs.home_ip }}
+          CLIENT_NAME: ${{ inputs.client_name }}
+          CLIENT_PASSWORD: ${{ inputs.client_password }}
+        run: |
+          bash scripts/bootstrap-client.sh "$HOST" "$SSH_PORT" "$PANEL_IP" "$HOME_IP" "$CLIENT_NAME" "$CLIENT_PASSWORD"
