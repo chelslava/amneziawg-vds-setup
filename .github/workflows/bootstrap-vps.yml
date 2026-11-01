@@ -1,0 +1,144 @@
+name: Bootstrap VPS (one-command remote install)
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: "VDS IP"
+        default: "45.38.23.86"
+      ssh_port:
+        description: "SSH port on the VDS"
+        default: "443"
+      panel_ip:
+        description: "IP allowed to open the panel"
+        default: "176.15.86.65"
+      home_ip:
+        description: "Second IP allowed to open the panel"
+        default: "95.25.41.234"
+      client_password:
+        description: "Password used to encrypt client config in logs"
+        required: true
+      client_name:
+        description: "First VPN client name"
+        default: "phone"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare SSH key and pinned host key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_awg
+          chmod 600 ~/.ssh/id_awg
+          ssh-keyscan -p "${{ inputs.ssh_port }}" "${{ inputs.host }}" > ./known_hosts 2>/dev/null
+          test -s ./known_hosts && echo "host key pinned:" && cat ./known_hosts
+
+      - name: Build installer
+        run: go build -trimpath -o ./awg-vds ./cmd/awg-vds
+
+      - name: Preflight upgrade with conffold and kernel headers
+        run: |
+          ssh -p "${{ inputs.ssh_port }}" -i ~/.ssh/id_awg \
+            -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes -o ConnectTimeout=20 root@"${{ inputs.host }}" '
+            export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+            apt-get update -qq >/dev/null 2>&1 || true
+            apt-get -y -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef upgrade >/dev/null 2>&1 || true
+            if apt-cache policy linux-headers-$(uname -r) 2>/dev/null | grep -q "Candidate: [^()]"; then
+              echo KERNEL_HEADERS_OK
+            else
+              apt-get -y -o Dpkg::Options::=--force-confold install linux-generic linux-headers-generic >/dev/null 2>&1 || true
+              nohup sh -c "sleep 2; reboot" >/dev/null 2>&1 &
+              echo REBOOT_SCHEDULED
+            fi'
+
+      - name: Wait for SSH after possible reboot
+        run: |
+          for i in $(seq 1 24); do
+            sleep 15
+            if ssh -p "${{ inputs.ssh_port }}" -i ~/.ssh/id_awg \
+              -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes -o ConnectTimeout=10 root@"${{ inputs.host }}" true 2>/dev/null; then
+              echo "SSH is back (attempt $i)"
+              exit 0
+            fi
+            echo "waiting ($i)..."
+          done
+          echo "server did not come back in time"
+          exit 1
+
+      - name: Install AmneziaWG (upstream)
+        run: |
+          ./awg-vds install \
+            --host "${{ inputs.host }}" \
+            --ssh-port "${{ inputs.ssh_port }}" \
+            --user root \
+            --identity-file ~/.ssh/id_awg \
+            --known-hosts ./known_hosts \
+            --engine upstream \
+            --restrict-panel-ip "${{ inputs.panel_ip }}" \
+            --timeout 2400
+
+      - name: Firewall: protect panel, keep SSH 443 reachable
+        run: |
+          ssh -p "${{ inputs.ssh_port }}" -i ~/.ssh/id_awg \
+            -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes root@"${{ inputs.host }}" "
+            set -eu
+            ufw default deny incoming >/dev/null
+            ufw default allow outgoing >/dev/null
+            ufw allow 22/tcp >/dev/null
+            ufw allow 443/tcp >/dev/null
+            ufw allow 1234/udp >/dev/null
+            ufw insert 1 allow from ${{ inputs.panel_ip }} to any port 51821 proto tcp >/dev/null
+            ufw insert 2 allow from ${{ inputs.home_ip }} to any port 51821 proto tcp >/dev/null
+            ufw insert 3 deny 51821/tcp >/dev/null
+            ufw route allow in on wg0 >/dev/null
+            ufw --force enable >/dev/null
+            ufw status verbose | head -14"
+
+      - name: Create first client via panel API and encrypt artifacts
+        run: |
+          set -eu
+          SSHOPT="-p ${{ inputs.ssh_port }} -i $HOME/.ssh/id_awg -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes"
+          PW=$(ssh $SSHOPT root@"${{ inputs.host }}" 'cat /opt/awg-vds/panel-password')
+          echo "::add-mask::$PW"
+          RESULT=$(ssh $SSHOPT root@"${{ inputs.host }}" "
+            set -eu
+            PW=\$(cat /opt/awg-vds/panel-password)
+            curl -s -c /tmp/awg-cookie -X POST http://127.0.0.1:51821/api/auth/password \
+              -H 'Content-Type: application/json' \
+              -d '{\"username\":\"admin\",\"password\":\"'\$PW'\",\"remember\":false}' >/dev/null
+            CREATE=\$(curl -s -b /tmp/awg-cookie -X POST http://127.0.0.1:51821/api/client \
+              -H 'Content-Type: application/json' -d '{\"name\":\"${{ inputs.client_name }}\",\"enabled\":true}')
+            echo \"CREATE_RESP=\$CREATE\"
+            CID=\$(echo \"\$CREATE\" | grep -oE '\"id\":\"[^\"]+\"' | head -1 | cut -d'\"' -f4)
+            if [ -z \"\$CID\" ]; then
+              CID=\$(curl -s -b /tmp/awg-cookie http://127.0.0.1:51821/api/client | grep -oE '\"id\":\"[^\"]+\"' | head -1 | cut -d'\"' -f4)
+            fi
+            echo \"CLIENT_ID=\$CID\"
+            for path in \"configuration\" \"config\" \"\"; do
+              CONF=\$(curl -s -b /tmp/awg-cookie \"http://127.0.0.1:51821/api/client/\$CID/\$path\")
+              case \"\$CONF\" in
+                *'[Interface]'*) echo \"\$CONF\" > /tmp/client.conf; echo CONF_FOUND=\$path; break ;;
+              esac
+            done
+            test -s /tmp/client.conf || { ls /app/server/chunks/routes/api/client/ 2>/dev/null || docker exec awg-vds-upstream ls /app/server/chunks/routes/api/client/; exit 3; }
+            sed -i \"s#Endpoint = .*#Endpoint = ${{ inputs.host }}:1234#\" /tmp/client.conf
+            openssl enc -aes-256-cbc -pbkdf2 -salt -a -in /tmp/client.conf \
+              -pass pass:'${{ inputs.client_password }}' -out /tmp/client.enc
+            echo '--- CLIENT_CONF_ENCRYPTED_BASE64_BELOW ---'
+            cat /tmp/client.enc
+            echo '--- END ---'
+            echo \"PANEL_PASSWORD_B64=\$(printf '%s' \"\$PW\" | openssl enc -aes-256-cbc -pbkdf2 -salt -a -pass pass:'${{ inputs.client_password }}' | tr -d '\n')\"
+            rm -f /tmp/awg-cookie /tmp/client.conf /tmp/client.enc
+          ")
+          echo "$RESULT"
