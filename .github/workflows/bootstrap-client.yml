@@ -18,9 +18,6 @@ on:
       client_name:
         description: "First VPN client name"
         default: "phone"
-      client_password:
-        description: "Password used to encrypt client config in logs"
-        required: true
 
 jobs:
   finish:
@@ -44,6 +41,6 @@ jobs:
           PANEL_IP: ${{ inputs.panel_ip }}
           HOME_IP: ${{ inputs.home_ip }}
           CLIENT_NAME: ${{ inputs.client_name }}
-          CLIENT_PASSWORD: ${{ inputs.client_password }}
+          CLIENT_PASSWORD: ${{ secrets.CLIENT_PASSWORD }}
         run: |
           bash scripts/bootstrap-client.sh "$HOST" "$SSH_PORT" "$PANEL_IP" "$HOME_IP" "$CLIENT_NAME" "$CLIENT_PASSWORD"

@@ -21,6 +21,8 @@ CLIENT_NAME=$3
 CLIENT_PASSWORD=$4
 
 echo "=== firewall:"
+export DEBIAN_FRONTEND=noninteractive
+command -v ufw >/dev/null || { apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq ufw >/dev/null 2>&1; }
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 ufw allow 22/tcp >/dev/null
