@@ -41,7 +41,7 @@ curl -s -c /tmp/awg-cookie -X POST http://127.0.0.1:51821/api/auth/password \
   -H 'Content-Type: application/json' \
   -d "{\"username\":\"admin\",\"password\":\"$PW\",\"remember\":false}" >/dev/null
 CREATE=$(curl -s -b /tmp/awg-cookie -X POST http://127.0.0.1:51821/api/client \
-  -H 'Content-Type: application/json' -d "{\"name\":\"$CLIENT_NAME\",\"enabled\":true}")
+  -H 'Content-Type: application/json' -d "{\"name\":\"$CLIENT_NAME\",\"expiresAt\":null,\"enabled\":true}")
 echo "CREATE_RESP=$CREATE"
 CID=$(printf '%s' "$CREATE" | grep -oE '"id":"[^"]+"' | head -1 | cut -d'"' -f4)
 if [ -z "$CID" ]; then
