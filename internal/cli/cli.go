@@ -357,7 +357,9 @@ func readPanelPasswordTUI(ctx context.Context, args []string, password string, e
 
 func healthRetryCommand(s state.State) string {
 	check := health.Command(s)
-	return fmt.Sprintf("set -eu; attempt=1; while test $attempt -le 6; do if %s; then stable=1; while test $stable -lt 3; do sleep 2; %s; stable=$((stable+1)); done; exit 0; fi; sleep 5; attempt=$((attempt+1)); done; exit 1", check, check)
+	// The stability window must never abort the retry loop: the panel can
+	// briefly refuse connections while the container is still booting.
+	return fmt.Sprintf("set -eu; attempt=1; while test $attempt -le 6; do if %s; then stable=1; ok=1; while test $stable -lt 3; do sleep 2; if ! %s; then ok=0; break; fi; stable=$((stable+1)); done; if test $ok -eq 1; then exit 0; fi; fi; sleep 5; attempt=$((attempt+1)); done; exit 1", check, check)
 }
 
 func installStep(out io.Writer, current, total int, label string) {

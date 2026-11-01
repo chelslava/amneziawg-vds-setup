@@ -160,10 +160,15 @@ func TestSupportedThirdPartyOS(t *testing.T) {
 
 func TestInstallHealthUsesRetryWindow(t *testing.T) {
 	cmd := healthRetryCommand(state.State{Container: "awg-vds-legacy", Image: config.LegacyImage, VPNPort: 1234, WebPort: 51821})
-	for _, want := range []string{"while test $attempt -le 6", "stable=1", "while test $stable -lt 3", "sleep 2", "sleep 5", "docker inspect", "exit 1"} {
+	for _, want := range []string{"while test $attempt -le 6", "stable=1", "ok=1", "while test $stable -lt 3", "sleep 2", "sleep 5", "docker inspect", "exit 1"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("health retry command lacks %q: %s", want, cmd)
 		}
+	}
+	// A transient refusal inside the stability window must continue the retry
+	// loop instead of tripping set -e and aborting the whole install.
+	if !strings.Contains(cmd, "if ! ") || !strings.Contains(cmd, "ok=0; break") {
+		t.Fatalf("stability window is not transient-failure tolerant: %s", cmd)
 	}
 }
 
