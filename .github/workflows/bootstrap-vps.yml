@@ -1,4 +1,4 @@
-name: Bootstrap VPS (bisect)
+name: Bootstrap VPS (bisect A)
 
 on:
   workflow_dispatch:
@@ -25,5 +25,52 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
-      - run: echo placeholder
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare SSH key and pinned host key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_awg
+          chmod 600 ~/.ssh/id_awg
+          ssh-keyscan -p "${{ inputs.ssh_port }}" "${{ inputs.host }}" > ./known_hosts 2>/dev/null
+          test -s ./known_hosts && echo "host key pinned:" && cat ./known_hosts
+
+      - name: Build installer
+        run: go build -trimpath -o ./awg-vds ./cmd/awg-vds
+
+      - name: Preflight upgrade with conffold and kernel headers
+        run: |
+          ssh -p "${{ inputs.ssh_port }}" -i ~/.ssh/id_awg             -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes             -o BatchMode=yes -o ConnectTimeout=20 root@"${{ inputs.host }}" '
+            export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+            apt-get update -qq >/dev/null 2>&1 || true
+            apt-get -y -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef upgrade >/dev/null 2>&1 || true
+            if apt-cache policy linux-headers-$(uname -r) 2>/dev/null | grep -q "Candidate: [^()]"; then
+              echo KERNEL_HEADERS_OK
+            else
+              apt-get -y -o Dpkg::Options::=--force-confold install linux-generic linux-headers-generic >/dev/null 2>&1 || true
+              nohup sh -c "sleep 2; reboot" >/dev/null 2>&1 &
+              echo REBOOT_SCHEDULED
+            fi'
+
+      - name: Wait for SSH after possible reboot
+        run: |
+          for i in $(seq 1 24); do
+            sleep 15
+            if ssh -p "${{ inputs.ssh_port }}" -i ~/.ssh/id_awg               -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes               -o BatchMode=yes -o ConnectTimeout=10 root@"${{ inputs.host }}" true 2>/dev/null; then
+              echo "SSH is back (attempt $i)"
+              exit 0
+            fi
+            echo "waiting ($i)..."
+          done
+          echo "server did not come back in time"
+          exit 1
+
+      - name: Install AmneziaWG (upstream)
+        run: |
+          ./awg-vds install             --host "${{ inputs.host }}"             --ssh-port "${{ inputs.ssh_port }}"             --user root             --identity-file ~/.ssh/id_awg             --known-hosts ./known_hosts             --engine upstream             --restrict-panel-ip "${{ inputs.panel_ip }}"             --timeout 2400
