@@ -142,3 +142,5 @@ jobs:
             rm -f /tmp/awg-cookie /tmp/client.conf /tmp/client.enc
           ")
           echo "$RESULT"
+
+# dispatch trigger registered on push
